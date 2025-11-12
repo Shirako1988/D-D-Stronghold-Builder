@@ -8,6 +8,7 @@ const TABS = [
     { id: 'rooms', label: 'Rooms', icon: '🏠' },
     { id: 'walls', label: 'Walls', icon: '🧱' },
     { id: 'staff', label: 'Staff', icon: '👥' },
+    { id: 'social', label: 'Soziales', icon: '🤝' },
     { id: 'economy', label: 'Wirtschaft', icon: '💰' },
     { id: 'defense', label: 'Verteidigung', icon: '🛡️' },
     { id: 'construction', label: 'Construction', icon: '🏗️' },
@@ -327,7 +328,7 @@ const ROOM_DESCRIPTIONS = {
     }
 };
 const MATERIAL_DESCRIPTIONS = {
-    glass: "Magisch verstärktes Glas, das überraschend widerstandsfähig ist. Ideal für Observatorien oder Gewächshäuser, wo Licht einfallen soll, aber dennoch ein gewisser Schutz erforderlich ist. Anfällig für erschütternden Schaden.",
+    glass: "Magisch verstärktes Glas, das überraschend widerstandsfähig ist. Ideal für Observatorien oder Gewächshausser, wo Licht einfallen soll, aber dennoch ein gewisser Schutz erforderlich ist. Anfällig für erschütternden Schaden.",
     crystal: "Gehärteter Kristall, durchdrungen von Erdmagie, der ihm eine unerwartete Zähigkeit verleiht. Bricht das Licht in faszinierenden Mustern.",
     ice: "Eine Mauer aus massivem Eis, magisch geformt und errichtet. Bietet schnellen, aber vergänglichen Schutz, da sie bei Temperaturen über dem Gefrierpunkt schmilzt. Anfällig für brachiale Gewalt und Feuer.",
     wood: "Robuste Palisaden aus behandeltem Hartholz. Eine schnelle und günstige Methode zur Befestigung, die jedoch anfällig für Feuer ist.",
@@ -763,20 +764,11 @@ const useStronghold = () => {
   const wallsTotal = useMemo(() => state.walls.reduce((sum, w) => sum + w.totalCost, 0), [state.walls]);
   const grandTotal = useMemo(() => componentsTotal + wallsTotal, [componentsTotal, wallsTotal]);
   const totalArea = useMemo(() => state.components.reduce((sum, c) => sum + c.area, 0), [state.components]);
-  const staffTotalWeekly = useMemo(() => state.staff.reduce((sum, s) => sum + s.totalCost, 0), [state.staff]);
   
   const maintenanceWeekly = useMemo(() => {
       const completedComponentsTotal = state.components.filter(c => c.constructionStatus === 'completed').reduce((sum, c) => sum + c.totalCost, 0);
       const completedWallsTotal = state.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.totalCost, 0);
       return (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
-  }, [state.components, state.walls]);
-
-  const weeklyUpkeep = useMemo(() => staffTotalWeekly + maintenanceWeekly, [staffTotalWeekly, maintenanceWeekly]);
-  
-  const totalConstructionDays = useMemo(() => {
-    const componentDays = state.components.filter(c => c.constructionStatus !== 'completed').reduce((sum, c) => sum + Math.ceil(calculateConstructionTime(c.baseCost) * (1 - c.rushPercent / 100)), 0);
-    const wallDays = state.walls.filter(w => w.constructionStatus !== 'completed').reduce((sum, w) => sum + Math.ceil(calculateConstructionTime(w.baseCost) * (1 - w.rushPercent / 100)), 0);
-    return componentDays + wallDays;
   }, [state.components, state.walls]);
 
     const baseMilitaryValue = useMemo(() => state.components.filter(c => c.classification === 'military' && c.constructionStatus === 'completed').reduce((sum, c) => sum + c.baseCost, 0) + state.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.baseCost, 0), [state.components, state.walls]);
@@ -796,6 +788,13 @@ const useStronghold = () => {
     const economicPotential = useMemo(() => economicValue * 0.025 * (economicValue > 0 ? Math.min(1, industrialValue / economicValue) : 0), [economicValue, industrialValue]);
     const weeklyProfit = useMemo(() => industrialPotential + economicPotential, [industrialPotential, economicPotential]);
 
+    const comparisonValue = useMemo(() => (militaryValue + industrialValue + economicValue) * 2, [militaryValue, industrialValue, economicValue]);
+    const salaryReductionPercentage = useMemo(() => (comparisonValue > 0 ? Math.min(100, (socialValue / comparisonValue) * 100) : 0), [socialValue, comparisonValue]);
+    
+    const baseStaffTotalWeekly = useMemo(() => state.staff.reduce((sum, s) => sum + s.totalCost, 0), [state.staff]);
+    const staffTotalWeekly = useMemo(() => baseStaffTotalWeekly * (1 - salaryReductionPercentage / 100), [baseStaffTotalWeekly, salaryReductionPercentage]);
+    const weeklyUpkeep = useMemo(() => staffTotalWeekly + maintenanceWeekly, [staffTotalWeekly, maintenanceWeekly]);
+
     const totalMerchantGold = useMemo(() => state.components.filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('shop')).reduce((sum, c) => sum + c.baseCost, 0) * 0.25, [state.components]);
 
     const defenseBonus = useMemo(() => militaryValue === 0 ? (formulaSV > 0 ? -0.9 : 0) : Math.max(-0.9, 2 - (formulaSV / militaryValue)), [militaryValue, formulaSV]);
@@ -805,6 +804,13 @@ const useStronghold = () => {
     const baseGarrisonCR = useMemo(() => state.staff.reduce((sum, s) => sum + (s.cr * s.quantity), 0), [state.staff]);
     const garrisonCR = useMemo(() => Math.max(0, baseGarrisonCR * (1 + defenseBonus)), [baseGarrisonCR, defenseBonus]);
     const attackCR = useMemo(() => Math.max(0.5, Math.min(30, totalValue / 2000)), [totalValue]);
+    
+    const totalConstructionDays = useMemo(() => {
+    const componentDays = state.components.filter(c => c.constructionStatus !== 'completed').reduce((sum, c) => sum + Math.ceil(calculateConstructionTime(c.baseCost) * (1 - c.rushPercent / 100)), 0);
+    const wallDays = state.walls.filter(w => w.constructionStatus !== 'completed').reduce((sum, w) => sum + Math.ceil(calculateConstructionTime(w.baseCost) * (1 - w.rushPercent / 100)), 0);
+    return componentDays + wallDays;
+    }, [state.components, state.walls]);
+
 
     const simulateNextWeek = useCallback(() => {
         setState(prevState => {
@@ -835,7 +841,12 @@ const useStronghold = () => {
             const economicPotSim = currentEV * 0.025 * efficiency;
             const profit = industrialPotSim + economicPotSim;
             newLog.push(`Woche ${weekNumber} (Wirtschaft): Einnahmen von ${profit.toFixed(2)} GP erzielt.`);
-            const staffCost = prevState.staff.reduce((sum, s) => sum + s.totalCost, 0);
+
+            const compVal = (currentMV + currentIV + currentEV) * 2;
+            const salRedPerc = compVal > 0 ? Math.min(100, (currentSV_social / compVal) * 100) : 0;
+            const baseStaffCost = prevState.staff.reduce((sum, s) => sum + s.totalCost, 0);
+            const staffCost = baseStaffCost * (1 - salRedPerc / 100);
+
             const completedComponentsTotal = prevState.components.filter(c => c.constructionStatus === 'completed').reduce((sum, c) => sum + c.totalCost, 0);
             const completedWallsTotal = prevState.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.totalCost, 0);
             const maintenanceCost = (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
@@ -923,10 +934,10 @@ const useStronghold = () => {
     startNewStronghold, exportSlot, importStronghold, startConstruction, completeConstruction, simulateNextWeek, repairDamage,
     setMerchantGoldSpentThisWeek, depositToTreasury, withdrawFromTreasury,
     saveSlots, activeSaveName, saveCurrentSlot, saveAsNewSlot, loadSlot, deleteSlot, renameSlot, copySlot,
-    siteModifier, componentsTotal, wallsTotal, grandTotal, totalArea, staffTotalWeekly, maintenanceWeekly, weeklyUpkeep,
+    siteModifier, componentsTotal, wallsTotal, grandTotal, totalArea, baseStaffTotalWeekly, staffTotalWeekly, maintenanceWeekly, weeklyUpkeep,
     totalConstructionDays, militaryValue, industrialValue, economicValue, socialValue, totalValue,
     industrialPotential, economicPotential, weeklyProfit, defenseBonus, attackChanceBonus, maxAttackRoll,
-    garrisonCR, attackCR, resources, getAllPerks, totalMerchantGold,
+    garrisonCR, attackCR, resources, getAllPerks, totalMerchantGold, comparisonValue, salaryReductionPercentage,
   };
 };
 
@@ -1788,6 +1799,73 @@ const StaffTab = ({ stronghold }) => {
     );
 };
 
+// --- From components/SocialTab.tsx ---
+const SocialTab = ({ stronghold }) => {
+    const { 
+        socialValue, 
+        comparisonValue, 
+        salaryReductionPercentage, 
+        baseStaffTotalWeekly, 
+        staffTotalWeekly 
+    } = stronghold;
+
+    const savings = baseStaffTotalWeekly - staffTotalWeekly;
+
+    const InfoRowSocial = ({ label, value, tooltip, className = '' }) => (
+        React.createElement("div", { className: `flex justify-between items-center py-2 border-b border-wood-light/30 ${className}`, title: tooltip },
+            React.createElement("span", null, `${label}:`),
+            React.createElement("span", { className: "font-bold text-lg" }, value)
+        )
+    );
+
+    return (
+        React.createElement("div", null,
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🤝 Soziales & Moral"),
+            React.createElement("p", { className: "mb-6" }, "Soziale Gebäude verbessern die Lebensqualität und Moral deiner Angestellten. Eine hohe Moral führt zu geringeren Gehaltsforderungen, da die Angestellten zufriedener sind."),
+            React.createElement("div", { className: "grid md:grid-cols-1 lg:grid-cols-2 gap-8" },
+                React.createElement("div", { className: "bg-blue-900/10 p-6 rounded-lg border-2 border-blue-800/50 shadow-lg" },
+                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900" }, "Berechnung der Gehaltsreduktion"),
+                    React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
+                        React.createElement(InfoRowSocial, { 
+                            label: "Sozialer Wert (SV)", 
+                            value: `${socialValue.toFixed(0)} GP`, 
+                            tooltip: "Der Gesamtwert aller fertiggestellten sozialen Gebäude." 
+                        }),
+                        React.createElement(InfoRowSocial, { 
+                            label: "Vergleichswert", 
+                            value: `${comparisonValue.toFixed(0)} GP`, 
+                            tooltip: "Die doppelte Summe des militärischen, industriellen und ökonomischen Wertes. Dient als Maßstab für die 'produktive' Größe der Festung." 
+                        }),
+                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-blue-800/40 pt-3 mt-3 font-bold text-xl text-blue-800" },
+                            React.createElement("span", null, "Gehaltsreduktion:"),
+                            React.createElement("span", null, `${salaryReductionPercentage.toFixed(2)}%`)
+                        )
+                    )
+                ),
+                React.createElement("div", { className: "bg-green-900/10 p-6 rounded-lg border-2 border-green-800/50 shadow-lg" },
+                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-green-900" }, "Auswirkung auf Gehälter"),
+                     React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
+                        React.createElement(InfoRowSocial, { 
+                            label: "Ursprüngliche Gehälter", 
+                            value: `${baseStaffTotalWeekly.toFixed(2)} GP/Woche`
+                        }),
+                        React.createElement(InfoRowSocial, { 
+                            label: "Einsparung", 
+                            value: `-${savings.toFixed(2)} GP/Woche`,
+                            className: 'text-yellow-600'
+                        }),
+                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-green-800/40 pt-3 mt-3 font-bold text-xl text-green-800" },
+                            React.createElement("span", null, "Endgültige Gehälter:"),
+                            React.createElement("span", null, `${staffTotalWeekly.toFixed(2)} GP/Woche`)
+                        )
+                    )
+                )
+            )
+        )
+    );
+};
+
+
 // --- From components/ConstructionTab.tsx ---
 const ConstructionTab = ({ stronghold }) => {
     const { components, walls, startConstruction, completeConstruction, removeComponent, removeWall } = stronghold;
@@ -2097,7 +2175,8 @@ const SummaryTab = ({ stronghold }) => {
     const { 
         components, walls, totalDamage, militaryValue, industrialValue, economicValue, socialValue,
         totalValue, totalArea, totalConstructionDays, weeklyUpkeep, weeklyProfit, resources, getAllPerks,
-        importStronghold, startNewStronghold, removeComponent, removeWall, repairDamage, saveCurrentSlot, activeSaveName
+        importStronghold, startNewStronghold, removeComponent, removeWall, repairDamage, saveCurrentSlot, activeSaveName,
+        staffTotalWeekly, maintenanceWeekly, industrialPotential, economicPotential
     } = stronghold;
     
     const [pendingDeletion, setPendingDeletion] = useState(null);
@@ -2187,7 +2266,7 @@ const SummaryTab = ({ stronghold }) => {
         React.createElement("div", null,
             React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "📊 Stronghold Summary"),
             React.createElement("p", { className: "mb-6" }, "A complete overview of your fortress, its construction, and its ongoing costs."),
-            React.createElement("div", { className: "grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8" },
+             React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-8" },
                 React.createElement("div", { className: "space-y-8" },
                     React.createElement(SummarySection, { title: "Asset Values", icon: "💎" },
                         React.createElement(SummaryRow, { label: "Militärischer Wert", value: `${militaryValue.toFixed(0)} gp` }),
@@ -2199,12 +2278,34 @@ const SummaryTab = ({ stronghold }) => {
                             React.createElement("span", null, `${totalValue.toFixed(0)} gp`)
                         )
                     ),
-                    React.createElement(SummarySection, { title: "Weekly Finances", icon: "💰" },
-                        React.createElement(SummaryRow, { label: "Profit (from buildings)", value: `${weeklyProfit.toFixed(2)} gp/Woche` }),
-                        React.createElement(SummaryRow, { label: "Total Upkeep", value: `-${weeklyUpkeep.toFixed(2)} gp/Woche`, isNegative: true }),
-                        React.createElement(SummaryTotalRow, { label: "NET WEEKLY INCOME", value: `${netWeeklyIncome.toFixed(2)} gp/Woche`, isNegative: netWeeklyIncome < 0})
+                    React.createElement(SummarySection, { title: "Resource Management", icon: "📦" },
+                        Object.keys(resources).map((key) => {
+                            const resource = resources[key];
+                            if (!resource || (resource.capacity === 0 && resource.demand === 0 && key !== 'storage')) return null;
+                            const isDeficit = resource.demand > resource.capacity;
+                            return React.createElement(SummaryRow, { key: key, label: SUMMARY_RESOURCE_LABELS[key], value: key === 'storage' ? `${resource.capacity}` : `${resource.demand} / ${resource.capacity}`, isNegative: isDeficit, className: isDeficit ? 'bg-red-300/50 -mx-2 px-2 rounded' : ''});
+                        })
                     ),
-                     React.createElement(SummarySection, { title: "Beschädigungen", icon: "🩹" },
+                    React.createElement(SummarySection, { title: "Construction Details", icon: "🏗️" },
+                        React.createElement(SummaryRow, { label: "Total Area", value: `${totalArea} sq ft` }),
+                        React.createElement(SummaryRow, { label: "Workers Required (Est.)", value: "N/A" }),
+                        React.createElement(SummaryRow, { label: "Remaining Build Time", value: `${totalConstructionDays} days` })
+                    )
+                ),
+                React.createElement("div", { className: "space-y-8" },
+                    React.createElement(SummarySection, { title: "Fähigkeiten der Festung", icon: "🌟" },
+                        React.createElement("div", { className: "space-y-2 max-h-[60vh] overflow-y-auto" },
+                             ALL_PERKS.map(perk => {
+                                const activeScaledBonus = scaledBonuses[perk.id];
+                                const isActiveStatic = staticPerks.some(p => p.id === perk.id);
+                                const isActive = !!activeScaledBonus || isActiveStatic;
+                                const bonusValue = activeScaledBonus?.totalBonus;
+                                const sourceList = perkSources[perk.id]?.join(', ') || 'Unbekannt';
+                                return React.createElement(PerkDisplay, { key: perk.id, perk: perk, bonus: bonusValue, isActive: isActive, sources: sourceList });
+                            })
+                        )
+                    ),
+                    React.createElement(SummarySection, { title: "Beschädigungen", icon: "🩹" },
                         React.createElement(SummaryRow, { label: "Gesamtschaden", value: `${totalDamage.toFixed(0)} GP`, isNegative: totalDamage > 0 }),
                         totalDamage > 0 && (
                             React.createElement("div", { className: "mt-4 pt-3 border-t-2 border-wood-light/30 space-y-2" },
@@ -2216,34 +2317,28 @@ const SummaryTab = ({ stronghold }) => {
                             )
                         )
                     )
-                ),
-                 React.createElement("div", { className: "space-y-8" },
-                    React.createElement(SummarySection, { title: "Resource Management", icon: "📦" },
-                        Object.keys(resources).map((key) => {
-                            const resource = resources[key];
-                            if (!resource || (resource.capacity === 0 && resource.demand === 0 && key !== 'storage')) return null;
-                            const isDeficit = resource.demand > resource.capacity;
-                            return React.createElement(SummaryRow, { key: key, label: SUMMARY_RESOURCE_LABELS[key], value: key === 'storage' ? `${resource.capacity}` : `${resource.demand} / ${resource.capacity}`, isNegative: isDeficit, className: isDeficit ? 'bg-red-300/50 -mx-2 px-2 rounded' : ''});
-                        })
-                    ),
-                    React.createElement(SummarySection, { title: "Construction Details", icon: "🏗️" },
-                        React.createElement(SummaryRow, { label: "Total Area", value: `${totalArea} sq ft` }),
-                        React.createElement(SummaryRow, { label: "Remaining Build Time", value: `${totalConstructionDays} days` }),
-                         React.createElement(SummaryRow, { label: "Workers Required (Est.)", value: `${Math.ceil(totalArea / 100)}` })
-                    )
-                ),
-                React.createElement("div", { className: "space-y-8 lg:col-span-2 xl:col-span-1" },
-                    React.createElement(SummarySection, { title: "Fähigkeiten der Festung", icon: "🌟" },
-                        React.createElement("div", { className: "space-y-2" },
-                             ALL_PERKS.map(perk => {
-                                const activeScaledBonus = scaledBonuses[perk.id];
-                                const isActiveStatic = staticPerks.some(p => p.id === perk.id);
-                                const isActive = !!activeScaledBonus || isActiveStatic;
-                                const bonusValue = activeScaledBonus?.totalBonus;
-                                const sourceList = perkSources[perk.id]?.join(', ') || 'Unbekannt';
-                                return React.createElement(PerkDisplay, { key: perk.id, perk: perk, bonus: bonusValue, isActive: isActive, sources: sourceList });
-                            })
+                )
+            ),
+            React.createElement("div", { className: "mt-8" },
+                React.createElement("div", { className: "bg-gradient-to-br from-gold/80 to-gold-dark/80 text-wood-dark p-6 rounded-lg border-2 border-wood-dark shadow-lg" },
+                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4" }, "💰 Weekly Finances"),
+                    React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-6" },
+                        React.createElement("div", { className: "bg-black/10 p-4 rounded" },
+                            React.createElement("h4", { className: "font-bold text-center text-lg text-green-800 mb-2" }, "📈 Income"),
+                            React.createElement(SummaryRow, { label: "Industrial Profit", value: `+${industrialPotential.toFixed(2)} gp` }),
+                            React.createElement(SummaryRow, { label: "Economic Profit", value: `+${economicPotential.toFixed(2)} gp` }),
+                            React.createElement(SummaryTotalRow, { label: "TOTAL PROFIT", value: `+${weeklyProfit.toFixed(2)} gp`, isNegative: false })
+                        ),
+                        React.createElement("div", { className: "bg-black/10 p-4 rounded" },
+                            React.createElement("h4", { className: "font-bold text-center text-lg text-red-800 mb-2" }, "📉 Expenses"),
+                            React.createElement(SummaryRow, { label: "Staff Salaries", value: `-${staffTotalWeekly.toFixed(2)} gp`, isNegative: true }),
+                            React.createElement(SummaryRow, { label: "Maintenance", value: `-${maintenanceWeekly.toFixed(2)} gp`, isNegative: true }),
+                            React.createElement(SummaryTotalRow, { label: "TOTAL UPKEEP", value: `-${weeklyUpkeep.toFixed(2)} gp`, isNegative: true })
                         )
+                    ),
+                    React.createElement("div", { className: `text-center border-t-4 border-wood-dark/50 mt-6 pt-4 font-bold text-2xl ${netWeeklyIncome >= 0 ? 'text-green-900' : 'text-red-900'}` },
+                        "Net Weekly Income: ",
+                        React.createElement("span", { className: "text-3xl ml-2" }, `${netWeeklyIncome.toFixed(2)} gp`)
                     )
                 )
             ),
@@ -2513,6 +2608,8 @@ const App = () => {
         return React.createElement(WallsTab, { stronghold: stronghold });
       case 'staff':
         return React.createElement(StaffTab, { stronghold: stronghold });
+      case 'social':
+        return React.createElement(SocialTab, { stronghold: stronghold });
       case 'economy':
         return React.createElement(EconomyTab, { stronghold: stronghold });
       case 'defense':
@@ -2542,8 +2639,10 @@ const App = () => {
           )
         ),
         React.createElement(Tabs, { activeTab: activeTab, setActiveTab: setActiveTab }),
-        React.createElement("main", { className: "bg-parchment-bg/95 border-x-3 border-b-3 border-wood rounded-b-lg p-4 sm:p-8 min-h-[500px]" },
-          renderTabContent()
+        React.createElement("main", { className: "bg-parchment-bg/95 border-x-3 border-b-3 border-wood rounded-b-lg p-4 sm:p-8 min-h-[500px] overflow-hidden" },
+          React.createElement("div", { key: activeTab, className: "tab-content-animation" },
+            renderTabContent()
+          )
         )
       )
     )
