@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
@@ -131,9 +132,9 @@ const COMPONENTS = {
         "Dock, basic": { cost: 500, ss: 1 },
         "Dock, extended": { cost: 3000, ss: 2 },
         "Dock, extended dry": { cost: 15000, ss: 2, perks: [PERK_LIST.SHIPBUILDING] },
-        "Shop, basic": { cost: 400, ss: 1, perks: [PERK_LIST.COMMERCE] },
-        "Shop, fancy": { cost: 4000, ss: 1, perks: [PERK_LIST.COMMERCE] },
-        "Shop, luxury": { cost: 16000, ss: 1, perks: [PERK_LIST.COMMERCE] },
+        "Shop, basic": { cost: 400, ss: 1, perks: [PERK_LIST.COMMERCE], jobs: [{ role: 'Merchant', count: 1 }] },
+        "Shop, fancy": { cost: 4000, ss: 1, perks: [PERK_LIST.COMMERCE], jobs: [{ role: 'Merchant', count: 2 }] },
+        "Shop, luxury": { cost: 16000, ss: 1, perks: [PERK_LIST.COMMERCE], jobs: [{ role: 'Merchant', count: 4 }] },
         "Tavern, basic": { cost: 900, ss: 1 },
         "Tavern, fancy": { cost: 4000, ss: 1 },
         "Tavern, luxury": { cost: 20000, ss: 1 },
@@ -771,10 +772,34 @@ const useStronghold = () => {
       return (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
   }, [state.components, state.walls]);
 
-    const baseMilitaryValue = useMemo(() => state.components.filter(c => c.classification === 'military' && c.constructionStatus === 'completed').reduce((sum, c) => sum + c.baseCost, 0) + state.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.baseCost, 0), [state.components, state.walls]);
-    const baseIndustrialValue = useMemo(() => state.components.filter(c => c.classification === 'industrial' && c.constructionStatus === 'completed').reduce((sum, c) => sum + c.baseCost, 0), [state.components]);
-    const baseEconomicValue = useMemo(() => state.components.filter(c => c.classification === 'economic' && c.constructionStatus === 'completed').reduce((sum, c) => sum + c.baseCost, 0), [state.components]);
-    const baseSocialValue = useMemo(() => state.components.filter(c => c.classification === 'social' && c.constructionStatus === 'completed').reduce((sum, c) => sum + c.baseCost, 0), [state.components]);
+    const calculateFullValue = useCallback((classification) => {
+        return state.components
+            .filter(c => c.classification === classification && c.constructionStatus === 'completed')
+            .reduce((sum, c) => sum + c.baseCost, 0);
+    }, [state.components]);
+
+    const calculateScaledValue = useCallback((classification) => {
+        return state.components
+            .filter(c => c.classification === classification && c.constructionStatus === 'completed')
+            .reduce((sum, c) => {
+                if (!c.jobSlots || c.jobSlots.length === 0) {
+                    return sum + c.baseCost;
+                }
+                const totalJobs = c.jobSlots.length;
+                const filledJobs = c.jobSlots.filter(j => j.filledBy).length;
+                const efficiency = totalJobs > 0 ? filledJobs / totalJobs : 1;
+                return sum + (c.baseCost * efficiency);
+            }, 0);
+    }, [state.components]);
+
+    const baseMilitaryValue = useMemo(() => {
+        const componentValue = calculateFullValue('military');
+        const wallValue = state.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.baseCost, 0);
+        return componentValue + wallValue;
+    }, [state.components, state.walls, calculateFullValue]);
+    const baseIndustrialValue = useMemo(() => calculateFullValue('industrial'), [calculateFullValue]);
+    const baseEconomicValue = useMemo(() => calculateFullValue('economic'), [calculateFullValue]);
+    const baseSocialValue = useMemo(() => calculateFullValue('social'), [calculateFullValue]);
 
     const damageShare = state.totalDamage > 0 ? state.totalDamage / 3 : 0;
     const militaryValue = Math.max(0, baseMilitaryValue - damageShare);
@@ -784,8 +809,17 @@ const useStronghold = () => {
     const formulaSV = industrialValue + economicValue;
     const totalValue = militaryValue + industrialValue + economicValue + socialValue;
 
-    const industrialPotential = useMemo(() => industrialValue * 0.005, [industrialValue]);
-    const economicPotential = useMemo(() => economicValue * 0.025 * (economicValue > 0 ? Math.min(1, industrialValue / economicValue) : 0), [economicValue, industrialValue]);
+    const industrialValueForProfit = useMemo(() => {
+        const scaledBase = calculateScaledValue('industrial');
+        return Math.max(0, scaledBase - damageShare);
+    }, [calculateScaledValue, damageShare]);
+    const economicValueForProfit = useMemo(() => {
+        const scaledBase = calculateScaledValue('economic');
+        return Math.max(0, scaledBase - damageShare);
+    }, [calculateScaledValue, damageShare]);
+
+    const industrialPotential = useMemo(() => industrialValueForProfit * 0.005, [industrialValueForProfit]);
+    const economicPotential = useMemo(() => economicValueForProfit * 0.025 * (economicValueForProfit > 0 ? Math.min(1, industrialValueForProfit / economicValueForProfit) : 0), [economicValueForProfit, industrialValueForProfit]);
     const weeklyProfit = useMemo(() => industrialPotential + economicPotential, [industrialPotential, economicPotential]);
 
     const comparisonValue = useMemo(() => (militaryValue + industrialValue + economicValue) * 2, [militaryValue, industrialValue, economicValue]);
@@ -795,7 +829,20 @@ const useStronghold = () => {
     const staffTotalWeekly = useMemo(() => baseStaffTotalWeekly * (1 - salaryReductionPercentage / 100), [baseStaffTotalWeekly, salaryReductionPercentage]);
     const weeklyUpkeep = useMemo(() => staffTotalWeekly + maintenanceWeekly, [staffTotalWeekly, maintenanceWeekly]);
 
-    const totalMerchantGold = useMemo(() => state.components.filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('shop')).reduce((sum, c) => sum + c.baseCost, 0) * 0.25, [state.components]);
+    const totalMerchantGold = useMemo(() => {
+        const scaledShopValue = state.components
+            .filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('shop'))
+            .reduce((sum, c) => {
+                if (!c.jobSlots || c.jobSlots.length === 0) {
+                    return sum + c.baseCost;
+                }
+                const totalJobs = c.jobSlots.length;
+                const filledJobs = c.jobSlots.filter(j => j.filledBy !== null).length;
+                const efficiency = totalJobs > 0 ? filledJobs / totalJobs : 1;
+                return sum + (c.baseCost * efficiency);
+            }, 0);
+        return scaledShopValue * 0.25;
+    }, [state.components]);
 
     const defenseBonus = useMemo(() => militaryValue === 0 ? (formulaSV > 0 ? -0.9 : 0) : Math.max(-0.9, 2 - (formulaSV / militaryValue)), [militaryValue, formulaSV]);
     const attackChanceBonus = useMemo(() => militaryValue === 0 ? (formulaSV > 0 ? 3.0 : -0.9) : Math.max(-0.9, (formulaSV / (2 * militaryValue)) - 0.9), [militaryValue, formulaSV]);
@@ -811,52 +858,116 @@ const useStronghold = () => {
     return componentDays + wallDays;
     }, [state.components, state.walls]);
 
+    const economicComponentsBreakdown = useMemo(() => {
+        return state.components
+            .filter(c => c.constructionStatus === 'completed' && ['industrial', 'economic'].includes(c.classification))
+            .map(c => {
+                const totalJobs = c.jobSlots?.length || 0;
+                const filledJobs = c.jobSlots?.filter(j => j.filledBy).length || 0;
+                const efficiency = totalJobs > 0 ? filledJobs / totalJobs : (totalJobs === 0 ? 1 : 0);
+                const currentValue = c.baseCost * efficiency;
+                const isShop = c.name.toLowerCase().includes('shop');
+                
+                return {
+                    id: c.id,
+                    name: c.name,
+                    classification: c.classification,
+                    jobRole: c.jobSlots?.[0]?.role || 'Arbeiter',
+                    totalJobs,
+                    filledJobs,
+                    baseValue: c.baseCost,
+                    currentValue,
+                    merchantGoldContribution: isShop ? currentValue * 0.25 : 0,
+                };
+            })
+            .sort((a, b) => {
+                const order = { industrial: 1, economic: 2 };
+                return order[a.classification] - order[b.classification];
+            });
+    }, [state.components]);
 
     const simulateNextWeek = useCallback(() => {
         setState(prevState => {
-            const baseMV = prevState.components.filter(c => c.classification === 'military' && c.constructionStatus === 'completed').reduce((s, c) => s + c.baseCost, 0) + prevState.walls.filter(w => w.constructionStatus === 'completed').reduce((s, w) => s + w.baseCost, 0);
-            const baseIV = prevState.components.filter(c => c.classification === 'industrial' && c.constructionStatus === 'completed').reduce((s, c) => s + c.baseCost, 0);
-            const baseEV = prevState.components.filter(c => c.classification === 'economic' && c.constructionStatus === 'completed').reduce((s, c) => s + c.baseCost, 0);
-            const baseSV_social = prevState.components.filter(c => c.classification === 'social' && c.constructionStatus === 'completed').reduce((s,c) => s + c.baseCost, 0);
-            const dmgShare = prevState.totalDamage > 0 ? prevState.totalDamage / 3 : 0;
-            const currentMV = Math.max(0, baseMV - dmgShare);
-            const currentIV = Math.max(0, baseIV - dmgShare);
-            const currentEV = Math.max(0, baseEV - dmgShare);
-            const currentSV_social = baseSV_social;
-            const currentFormulaSV = currentIV + currentEV;
-            const currentTV = currentMV + currentIV + currentEV + currentSV_social;
+            let newState = JSON.parse(JSON.stringify(prevState));
+            const newLog = [...(newState.simulationLog || [])];
+            
+            const calculateSimScaledValue = (classification, components) => {
+                return components
+                    .filter(c => c.classification === classification && c.constructionStatus === 'completed')
+                    .reduce((sum, c) => {
+                        if (!c.jobSlots || c.jobSlots.length === 0) return sum + c.baseCost;
+                        const totalJobs = c.jobSlots.length;
+                        const filledJobs = c.jobSlots.filter(j => j.filledBy).length;
+                        const efficiency = totalJobs > 0 ? filledJobs / totalJobs : 1;
+                        return sum + (c.baseCost * efficiency);
+                    }, 0);
+            };
+
+            const calculateSimFullValue = (classification, components) => {
+                 return components
+                    .filter(c => c.classification === classification && c.constructionStatus === 'completed')
+                    .reduce((sum, c) => sum + c.baseCost, 0);
+            };
+            
+            const dmgShare_sim = newState.totalDamage > 0 ? newState.totalDamage / 3 : 0;
+
+            const baseMV_sim_comp = calculateSimFullValue('military', newState.components);
+            const wallValue_sim = newState.walls.filter(w => w.constructionStatus === 'completed').reduce((s, w) => s + w.baseCost, 0);
+            const baseMV_sim = baseMV_sim_comp + wallValue_sim;
+            const baseIV_sim_full = calculateSimFullValue('industrial', newState.components);
+            const baseEV_sim_full = calculateSimFullValue('economic', newState.components);
+            const baseSV_social_sim_full = calculateSimFullValue('social', newState.components);
+
+            const currentMV = Math.max(0, baseMV_sim - dmgShare_sim);
+            const currentIV_full = Math.max(0, baseIV_sim_full - dmgShare_sim);
+            const currentEV_full = Math.max(0, baseEV_sim_full - dmgShare_sim);
+            const currentSV_social = baseSV_social_sim_full;
+            const currentFormulaSV = currentIV_full + currentEV_full;
+            const currentTV = currentMV + currentIV_full + currentEV_full + currentSV_social;
             const currentDefenseBonus = currentMV === 0 ? (currentFormulaSV > 0 ? -0.9 : 0) : Math.max(-0.9, 2 - (currentFormulaSV / currentMV));
             const currentAttackChanceBonus = currentMV === 0 ? (currentFormulaSV > 0 ? 3.0 : -0.9) : Math.max(-0.9, (currentFormulaSV / (2 * currentMV)) - 0.9);
             const currentMaxAttackRoll = Math.max(2, Math.min(100, Math.round(25 * (currentAttackChanceBonus + 1))));
-            const currentBaseGarrisonCR = prevState.staff.reduce((s, st) => s + (st.cr * st.quantity), 0);
+            const currentBaseGarrisonCR = newState.staff.reduce((s, st) => s + (st.cr * st.quantity), 0);
             const currentGarrisonCR = Math.max(0, currentBaseGarrisonCR * (1 + currentDefenseBonus));
             const currentAttackCR = Math.max(0.5, Math.min(30, currentTV / 2000));
-
-            let newState = JSON.parse(JSON.stringify(prevState));
-            const newLog = [...(newState.simulationLog || [])];
+            
             const weekNumber = Math.floor((newState.simulationLog || []).filter((l) => l.includes('(Wirtschaft)')).length) + 1;
 
-            const industrialPotSim = currentIV * 0.005;
-            const efficiency = currentEV > 0 ? Math.min(1, currentIV / currentEV) : 0;
-            const economicPotSim = currentEV * 0.025 * efficiency;
+            const baseIV_sim_scaled = calculateSimScaledValue('industrial', newState.components);
+            const baseEV_sim_scaled = calculateSimScaledValue('economic', newState.components);
+            const currentIV_scaled = Math.max(0, baseIV_sim_scaled - dmgShare_sim);
+            const currentEV_scaled = Math.max(0, baseEV_sim_scaled - dmgShare_sim);
+            
+            const industrialPotSim = currentIV_scaled * 0.005;
+            const efficiency = currentEV_scaled > 0 ? Math.min(1, currentIV_scaled / currentEV_scaled) : 0;
+            const economicPotSim = currentEV_scaled * 0.025 * efficiency;
             const profit = industrialPotSim + economicPotSim;
             newLog.push(`Woche ${weekNumber} (Wirtschaft): Einnahmen von ${profit.toFixed(2)} GP erzielt.`);
 
-            const compVal = (currentMV + currentIV + currentEV) * 2;
+            const compVal = (currentMV + currentIV_full + currentEV_full) * 2;
             const salRedPerc = compVal > 0 ? Math.min(100, (currentSV_social / compVal) * 100) : 0;
-            const baseStaffCost = prevState.staff.reduce((sum, s) => sum + s.totalCost, 0);
+            const baseStaffCost = newState.staff.reduce((sum, s) => sum + s.totalCost, 0);
             const staffCost = baseStaffCost * (1 - salRedPerc / 100);
 
-            const completedComponentsTotal = prevState.components.filter(c => c.constructionStatus === 'completed').reduce((sum, c) => sum + c.totalCost, 0);
-            const completedWallsTotal = prevState.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.totalCost, 0);
+            const completedComponentsTotal = newState.components.filter(c => c.constructionStatus === 'completed').reduce((sum, c) => sum + c.totalCost, 0);
+            const completedWallsTotal = newState.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.totalCost, 0);
             const maintenanceCost = (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
             const totalUpkeep = staffCost + maintenanceCost;
             const netIncome = profit - totalUpkeep;
             const previousTreasury = newState.strongholdTreasury || 0;
             newState.strongholdTreasury = previousTreasury + netIncome;
             newLog.push(`Woche ${weekNumber} (Wirtschaft): Nettoeinkommen von ${netIncome.toFixed(2)} GP. Neues Vermögen: ${newState.strongholdTreasury.toFixed(2)} GP.`);
-            const currentShopValue = prevState.components.filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('shop')).reduce((sum, c) => sum + c.baseCost, 0);
-            const currentTotalMerchantGold = currentShopValue * 0.25;
+            
+            const scaledShopValue_sim = newState.components
+                .filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('shop'))
+                .reduce((sum, c) => {
+                    if (!c.jobSlots || c.jobSlots.length === 0) return sum + c.baseCost;
+                    const totalJobs = c.jobSlots.length;
+                    const filledJobs = c.jobSlots.filter(j => j.filledBy !== null).length;
+                    const efficiencyRatio = totalJobs > 0 ? filledJobs / totalJobs : 1;
+                    return sum + (c.baseCost * efficiencyRatio);
+                }, 0);
+            const currentTotalMerchantGold = scaledShopValue_sim * 0.25;
             newLog.push(`Woche ${weekNumber} (Wirtschaft): Händlergold wurde auf ${currentTotalMerchantGold.toFixed(2)} GP zurückgesetzt.`);
             newState.merchantGoldSpentThisWeek = 0;
 
@@ -882,7 +993,7 @@ const useStronghold = () => {
         const demand = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 0, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
 
         state.components.filter(c => c.constructionStatus === 'completed').forEach(c => {
-            let canProvide = !c.jobSlots.length || c.jobSlots.every(slot => slot.filledBy !== null);
+            let canProvide = !c.jobSlots.length || c.jobSlots.some(slot => slot.filledBy !== null);
             if (canProvide) {
                 const { resources: scaledResources } = calculateScaledBenefits(c.name, c.category, c.area);
                 for (const [resource, value] of Object.entries(scaledResources)) { capacity[resource] += value; }
@@ -914,6 +1025,9 @@ const useStronghold = () => {
         const activeStaticPerkIds = new Set();
 
         state.components.filter(c => c.constructionStatus === 'completed').forEach(c => {
+            const canProvide = !c.jobSlots.length || c.jobSlots.some(slot => slot.filledBy !== null);
+            if (!canProvide) return;
+            
             const { perks: scaledPerks } = calculateScaledBenefits(c.name, c.category, c.area);
             scaledPerks.forEach(perk => {
                 if (perk.baseBonus && perk.finalBonus) {
@@ -938,30 +1052,31 @@ const useStronghold = () => {
     totalConstructionDays, militaryValue, industrialValue, economicValue, socialValue, totalValue,
     industrialPotential, economicPotential, weeklyProfit, defenseBonus, attackChanceBonus, maxAttackRoll,
     garrisonCR, attackCR, resources, getAllPerks, totalMerchantGold, comparisonValue, salaryReductionPercentage,
+    economicComponentsBreakdown
   };
 };
 
 // --- From components/Header.tsx ---
 const Header = () => (
-  React.createElement("header", { className: "text-center mb-6 p-5 bg-gradient-to-br from-gold to-gold-dark border-4 border-wood rounded-lg shadow-inner shadow-black/20" },
-    React.createElement("h1", { className: "font-medieval text-4xl sm:text-5xl text-wood-dark drop-shadow-[2px_2px_3px_rgba(0,0,0,0.3)] mb-2" },
+  React.createElement("header", { className: "text-center mb-6 p-5 bg-gradient-to-br from-gold to-gold-dark dark:from-wood-dark dark:to-gray-900 border-4 border-wood dark:border-gold-dark rounded-lg shadow-inner shadow-black/20" },
+    React.createElement("h1", { className: "font-medieval text-4xl sm:text-5xl text-wood-dark dark:text-gold-light drop-shadow-[2px_2px_3px_rgba(0,0,0,0.3)] mb-2" },
       "⚔️ D&D Stronghold Builder ⚔️"
     ),
-    React.createElement("p", { className: "text-lg text-wood-text italic" }, "Build Your Fantasy Fortress with Precision")
+    React.createElement("p", { className: "text-lg text-wood-text dark:text-parchment-light italic" }, "Build Your Fantasy Fortress with Precision")
   )
 );
 
 // --- From components/Tabs.tsx ---
 const Tabs = ({ activeTab, setActiveTab }) => (
-  React.createElement("nav", { className: "flex flex-col sm:flex-row bg-wood rounded-t-lg overflow-hidden" },
+  React.createElement("nav", { className: "flex flex-col sm:flex-row bg-wood dark:bg-gray-700 rounded-t-lg overflow-hidden" },
     TABS.map(tab => (
       React.createElement("button", {
         key: tab.id,
         onClick: () => setActiveTab(tab.id),
-        className: `flex-1 p-4 font-cinzel text-base font-semibold cursor-pointer transition-all duration-300 ease-in-out border-b-2 sm:border-b-0 sm:border-r-2 border-wood-dark last:border-r-0
+        className: `flex-1 p-4 font-cinzel text-base font-semibold cursor-pointer transition-all duration-300 ease-in-out border-b-2 sm:border-b-0 sm:border-r-2 border-wood-dark dark:border-gray-900 last:border-r-0
           ${activeTab === tab.id
-            ? 'bg-parchment-light text-wood'
-            : 'bg-wood-light text-parchment-bg hover:bg-gold-dark'
+            ? 'bg-parchment-light dark:bg-gray-900 text-wood dark:text-gold-light'
+            : 'bg-wood-light dark:bg-gray-600 text-parchment-bg dark:text-gray-300 hover:bg-gold-dark dark:hover:bg-gold dark:hover:text-wood-dark'
           }`
       },
       `${tab.icon} ${tab.label}`
@@ -973,7 +1088,7 @@ const Tabs = ({ activeTab, setActiveTab }) => (
 // --- From components/SiteTab.tsx ---
 const FormGroup = ({ label, children }) => (
     React.createElement("div", { className: "flex-1 min-w-[200px] mb-4" },
-        React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, label),
+        React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, label),
         children
     )
 );
@@ -1015,11 +1130,11 @@ const SiteTab = ({ stronghold }) => {
 
     return (
         React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🏰 Site Selection"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🏰 Site Selection"),
             React.createElement("p", { className: "mb-6" }, "Wähle den Standort für deine Festung. Der Ort beeinflusst die Endkosten durch verschiedene Modifikatoren."),
             React.createElement("div", { className: "flex flex-wrap gap-6" },
                 React.createElement(FormGroup, { label: "Climate/Terrain Type" },
-                    React.createElement("select", { name: "climate", value: site.climate, onChange: handleChange, className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" },
+                    React.createElement("select", { name: "climate", value: site.climate, onChange: handleChange, className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" },
                         React.createElement("option", { value: "" }, "Wähle Klima/Gelände"),
                         Object.entries(SITE_MODIFIERS.climate).map(([key, mod]) => 
                             React.createElement("option", { key: key, value: key },
@@ -1029,7 +1144,7 @@ const SiteTab = ({ stronghold }) => {
                     )
                 ),
                 React.createElement(FormGroup, { label: "Primary Settlement" },
-                    React.createElement("select", { name: "settlement", value: site.settlement, onChange: handleChange, className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" },
+                    React.createElement("select", { name: "settlement", value: site.settlement, onChange: handleChange, className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" },
                         React.createElement("option", { value: "" }, "Wähle Siedlung"),
                         Object.entries(SITE_MODIFIERS.settlement).map(([key, mod]) => 
                             React.createElement("option", { key: key, value: key },
@@ -1040,28 +1155,28 @@ const SiteTab = ({ stronghold }) => {
                 )
             ),
             React.createElement("div", { className: "mb-6" },
-                React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Nearby Features"),
+                React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Nearby Features"),
                 React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2" },
                     Object.entries(SITE_MODIFIERS.features).map(([key, mod]) => (
                         React.createElement("label", { 
                             key: key, 
-                            className: "flex items-center space-x-2 p-2 rounded hover:bg-parchment-dark/30 cursor-pointer",
+                            className: "flex items-center space-x-2 p-2 rounded hover:bg-parchment-dark/30 dark:hover:bg-gray-700/50 cursor-pointer",
                             onMouseEnter: () => setDescription(FEATURE_DESCRIPTIONS[key] || 'Keine Beschreibung verfügbar.'),
                             onMouseLeave: handleFeatureMouseLeave
                         },
-                            React.createElement("input", { type: "checkbox", name: "features", value: key, checked: site.features.includes(key), onChange: handleChange, className: "h-5 w-5 rounded border-gold text-wood focus:ring-wood-light" }),
+                            React.createElement("input", { type: "checkbox", name: "features", value: key, checked: site.features.includes(key), onChange: handleChange, className: "h-5 w-5 rounded border-gold dark:border-gray-500 text-wood dark:text-gold-dark focus:ring-wood-light dark:focus:ring-gold" }),
                             React.createElement("span", null, `${key.charAt(0).toUpperCase() + key.slice(1)} (${mod > 0 ? `+${mod}` : mod}%)`)
                         )
                     ))
                 )
             ),
-             React.createElement("div", { className: "mt-6 bg-blue-900/10 p-4 rounded-lg border-l-4 border-blue-600 min-h-[80px]" },
-                React.createElement("h4", { className: "text-xl font-semibold text-blue-800" }, "📖 Beschreibung"),
-                React.createElement("p", { className: "mt-2 text-wood-text/80 italic" }, description)
+             React.createElement("div", { className: "mt-6 bg-blue-900/10 dark:bg-blue-900/30 p-4 rounded-lg border-l-4 border-blue-600 dark:border-blue-400 min-h-[80px]" },
+                React.createElement("h4", { className: "text-xl font-semibold text-blue-800 dark:text-blue-200" }, "📖 Beschreibung"),
+                React.createElement("p", { className: "mt-2 text-wood-text/80 dark:text-parchment-bg/70 italic" }, description)
             ),
-            React.createElement("div", { className: "mt-8 bg-wood/10 border-2 border-wood-light rounded-lg p-4" },
-                React.createElement("h3", { className: "text-xl font-semibold text-wood-dark" }, "Current Site Modifier: ", 
-                    React.createElement("span", { className: `ml-2 font-bold ${siteModifier > 0 ? 'text-red-700' : 'text-green-700'}` },
+            React.createElement("div", { className: "mt-8 bg-wood/10 dark:bg-gray-700/30 border-2 border-wood-light dark:border-gray-600 rounded-lg p-4" },
+                React.createElement("h3", { className: "text-xl font-semibold text-wood-dark dark:text-gold-light" }, "Current Site Modifier: ", 
+                    React.createElement("span", { className: `ml-2 font-bold ${siteModifier > 0 ? 'text-red-700 dark:text-red-400' : 'text-green-700 dark:text-green-400'}` },
                         `${siteModifier > 0 ? `+${siteModifier}` : siteModifier}%`
                     )
                 )
@@ -1134,37 +1249,37 @@ const CalculatedBenefitsDisplay = ({ area, benefits, componentName, calculatedBa
     const hasBenefits = Object.keys(resources).length > 0 || jobs.length > 0 || perks.length > 0 || (isShop && merchantGold > 0);
 
     return (
-        React.createElement("div", { className: "bg-blue-900/10 p-4 rounded-lg border-l-4 border-blue-600" },
-            React.createElement("h4", { className: "text-xl font-semibold text-blue-800" }, `Kalkulierte Vorteile (bei ${area} sq ft)`),
+        React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-4 rounded-lg border-l-4 border-blue-600 dark:border-blue-400" },
+            React.createElement("h4", { className: "text-xl font-semibold text-blue-800 dark:text-blue-200" }, `Kalkulierte Vorteile (bei ${area} sq ft)`),
             hasBenefits ? (
-                 React.createElement("div", { className: "mt-2 text-wood-text/90 space-y-2" },
+                 React.createElement("div", { className: "mt-2 text-wood-text/90 dark:text-parchment-bg/80 space-y-2" },
                     Object.entries(resources).map(([key, value]) => (
-                        React.createElement("div", { key: key, className: "border-t border-blue-600/20 pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0" },
+                        React.createElement("div", { key: key, className: "border-t border-blue-600/20 dark:border-blue-400/20 pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0" },
                             React.createElement("p", null, React.createElement("strong", null, "Ressource:"), ` +${value} ${RESOURCE_LABELS[key]}`),
-                            React.createElement("p", { className: "text-sm text-wood-text/80 italic pl-4" }, RESOURCE_EXPLANATIONS[key] || 'Regeltechnische Erklärung nicht verfügbar.')
+                            React.createElement("p", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70 italic pl-4" }, RESOURCE_EXPLANATIONS[key] || 'Regeltechnische Erklärung nicht verfügbar.')
                         )
                     )),
                     jobs.map((job, index) => (
-                         React.createElement("div", { key: index, className: "border-t border-blue-600/20 pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0" },
+                         React.createElement("div", { key: index, className: "border-t border-blue-600/20 dark:border-blue-400/20 pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0" },
                             React.createElement("p", null, React.createElement("strong", null, "Arbeitsplätze:"), ` ${job.count} ${job.role}(s)`),
-                            React.createElement("p", { className: "text-sm text-wood-text/80 italic pl-4" }, JOB_EXPLANATION_GENERIC)
+                            React.createElement("p", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70 italic pl-4" }, JOB_EXPLANATION_GENERIC)
                          )
                     )),
                     perks.map((perk, index) => (
-                        React.createElement("div", { key: index, className: "border-t border-blue-600/20 pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0" },
+                        React.createElement("div", { key: index, className: "border-t border-blue-600/20 dark:border-blue-400/20 pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0" },
                             React.createElement("p", null, React.createElement("strong", null, "Fähigkeit:"), ` ${perk.name} ${perk.finalBonus ? `+${perk.finalBonus}` : ''}`),
-                            React.createElement("p", { className: "text-sm text-wood-text/80 italic pl-4" }, PERK_EXPLANATIONS[perk.id] || perk.description)
+                            React.createElement("p", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70 italic pl-4" }, PERK_EXPLANATIONS[perk.id] || perk.description)
                         )
                     )),
                     isShop && merchantGold > 0 && (
-                        React.createElement("div", { className: "border-t border-blue-600/20 pt-2 mt-2" },
+                        React.createElement("div", { className: "border-t border-blue-600/20 dark:border-blue-400/20 pt-2 mt-2" },
                             React.createElement("p", null, React.createElement("strong", null, "Wirtschaft:"), ` +${merchantGold.toFixed(0)} GP Händlergold/Woche`),
                             React.createElement("p", null, React.createElement("strong", null, "Wirtschaft:"), ` Max. Gegenstandswert ${merchantGold.toFixed(0)} GP`)
                         )
                     )
                 )
             ) : (
-                React.createElement("p", { className: "mt-2 text-wood-text/80 italic" }, "Dieser Raum bietet bei der aktuellen Größe keine direkten Vorteile.")
+                React.createElement("p", { className: "mt-2 text-wood-text/80 dark:text-parchment-bg/70 italic" }, "Dieser Raum bietet bei der aktuellen Größe keine direkten Vorteile.")
             )
         )
     );
@@ -1274,14 +1389,14 @@ const RoomBuilderForm = ({ stronghold }) => {
         React.createElement("div", { className: "space-y-6" },
             React.createElement("div", { className: "grid md:grid-cols-2 gap-6" },
                  React.createElement("div", null,
-                    React.createElement("label", { htmlFor: "componentCategory", className: "block font-semibold mb-2 text-wood text-lg" }, "Category"),
-                    React.createElement("select", { id: "componentCategory", value: category, onChange: handleCategoryChange, className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" },
+                    React.createElement("label", { htmlFor: "componentCategory", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Category"),
+                    React.createElement("select", { id: "componentCategory", value: category, onChange: handleCategoryChange, className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" },
                         Object.keys(COMPONENTS).map(cat => React.createElement("option", { key: cat, value: cat }, cat))
                     )
                 ),
                 React.createElement("div", null,
-                    React.createElement("label", { htmlFor: "componentSelect", className: "block font-semibold mb-2 text-wood text-lg" }, "Component"),
-                    React.createElement("select", { id: "componentSelect", value: componentName, onChange: e => setComponentName(e.target.value), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" },
+                    React.createElement("label", { htmlFor: "componentSelect", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Component"),
+                    React.createElement("select", { id: "componentSelect", value: componentName, onChange: e => setComponentName(e.target.value), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" },
                         Object.keys(COMPONENTS[category]).map(name => 
                             React.createElement("option", { key: name, value: name },
                                 `${name} ${generateComponentSummary(name, category)}`
@@ -1291,8 +1406,8 @@ const RoomBuilderForm = ({ stronghold }) => {
                 )
             ),
             React.createElement("div", null,
-                React.createElement("label", { htmlFor: "classification", className: "block font-semibold mb-2 text-wood text-lg" }, "Classification"),
-                React.createElement("select", { id: "classification", value: classification, onChange: e => setClassification(e.target.value), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" },
+                React.createElement("label", { htmlFor: "classification", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Classification"),
+                React.createElement("select", { id: "classification", value: classification, onChange: e => setClassification(e.target.value), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" },
                     React.createElement("option", { value: "military" }, "Militärisch"),
                     React.createElement("option", { value: "industrial" }, "Industriell"),
                     React.createElement("option", { value: "economic" }, "Ökonomisch"),
@@ -1301,23 +1416,23 @@ const RoomBuilderForm = ({ stronghold }) => {
             ),
             React.createElement("div", { className: "grid md:grid-cols-2 gap-6" },
                 React.createElement("div", null,
-                    React.createElement("label", { htmlFor: "length", className: "block font-semibold mb-2 text-wood text-lg" }, "Length (feet)"),
+                    React.createElement("label", { htmlFor: "length", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Length (feet)"),
                     React.createElement("input", { type: "number", id: "length", value: length, 
                         onChange: e => setLength(parseInt(e.target.value) || 0), 
                         onBlur: () => handleDimensionBlur(length, setLength, minLength),
                         step: "5", min: minLength, 
-                        className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" })
+                        className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" })
                 ),
                 React.createElement("div", null,
-                    React.createElement("label", { htmlFor: "width", className: "block font-semibold mb-2 text-wood text-lg" }, "Width (feet)"),
+                    React.createElement("label", { htmlFor: "width", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Width (feet)"),
                     React.createElement("input", { type: "number", id: "width", value: width, 
                         onChange: e => setWidth(parseInt(e.target.value) || 0),
                         onBlur: () => handleDimensionBlur(width, setWidth, minWidth),
                         step: "5", min: minWidth,
-                        className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" })
+                        className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" })
                 )
             ),
-             React.createElement("div", { className: "bg-wood/10 p-4 rounded-lg border-l-4 border-wood-light space-y-2" },
+             React.createElement("div", { className: "bg-wood/10 dark:bg-gray-700/30 p-4 rounded-lg border-l-4 border-wood-light dark:border-gray-500 space-y-2" },
                 React.createElement("div", { className: "flex justify-between" }, React.createElement("strong", null, "Area:"), React.createElement("span", null, `${area} sq ft`)),
                 React.createElement("div", { className: "flex justify-between" }, React.createElement("strong", null, "Cost per sq ft:"), React.createElement("span", null, `${costPerSqFt.toFixed(2)} gp`)),
                 React.createElement("div", { className: "flex justify-between" }, React.createElement("strong", null, "Calculated Base Cost:"), React.createElement("span", null, `${calculatedBaseCost.toFixed(0)} gp`)),
@@ -1329,22 +1444,22 @@ const RoomBuilderForm = ({ stronghold }) => {
                 componentName: componentName,
                 calculatedBaseCost: calculatedBaseCost
             }),
-            React.createElement("div", { className: "bg-green-900/10 p-4 rounded-lg border-l-4 border-green-600 space-y-4" },
-                React.createElement("h4", { className: "text-xl font-semibold text-green-800" }, "🏗️ Construction Options"),
+            React.createElement("div", { className: "bg-green-900/10 dark:bg-green-900/30 p-4 rounded-lg border-l-4 border-green-600 dark:border-green-400 space-y-4" },
+                React.createElement("h4", { className: "text-xl font-semibold text-green-800 dark:text-green-200" }, "🏗️ Construction Options"),
                 React.createElement("div", null,
-                    React.createElement("label", { htmlFor: "componentRushCharge", className: "block font-semibold mb-2 text-wood text-lg" }, "⚡ Rush Charge"),
-                    React.createElement("select", { id: "componentRushCharge", value: rushPercent, onChange: e => setRushPercent(parseInt(e.target.value)), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80 focus:border-wood focus:outline-none focus:ring-2 focus:ring-wood-light" },
+                    React.createElement("label", { htmlFor: "componentRushCharge", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "⚡ Rush Charge"),
+                    React.createElement("select", { id: "componentRushCharge", value: rushPercent, onChange: e => setRushPercent(parseInt(e.target.value)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light focus:border-wood dark:focus:border-gold-light focus:outline-none focus:ring-2 focus:ring-wood-light dark:focus:ring-gold-light" },
                         [0, 10, 20, 30, 40, 50, 60, 70].map(p => React.createElement("option", { key: p, value: p }, p === 0 ? "Standard Construction (0%)" : `Rush ${p}% (+${p}% cost, -${p}% time)`))
                     )
                 ),
                  React.createElement("div", { className: "flex justify-between font-bold" }, React.createElement("span", null, "⏱️ Construction Time:"), React.createElement("span", null, `${constructionDays} days`)),
                 React.createElement("div", { className: "flex justify-between font-bold text-lg" }, React.createElement("span", null, "💰 Total Cost (with Rush):"), React.createElement("span", null, `${totalCost.toFixed(0)} gp`))
             ),
-             React.createElement("div", { className: "bg-blue-900/10 p-4 rounded-lg border-l-4 border-blue-600" },
-                React.createElement("h4", { className: "text-xl font-semibold text-blue-800" }, "📖 Room Description"),
-                React.createElement("p", { className: "mt-2 text-wood-text/80 italic" }, description)
+             React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-4 rounded-lg border-l-4 border-blue-600 dark:border-blue-400" },
+                React.createElement("h4", { className: "text-xl font-semibold text-blue-800 dark:text-blue-200" }, "📖 Room Description"),
+                React.createElement("p", { className: "mt-2 text-wood-text/80 dark:text-parchment-bg/70 italic" }, description)
             ),
-            React.createElement("button", { onClick: handleAddComponent, className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg font-bold py-3 px-6 rounded-lg border-2 border-wood-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark transition-all duration-300 transform hover:-translate-y-0.5 shadow-md" },
+            React.createElement("button", { onClick: handleAddComponent, className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg dark:from-gold dark:to-gold-dark dark:text-wood-dark font-bold py-3 px-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark dark:hover:from-gold-light dark:hover:to-gold transition-all duration-300 transform hover:-translate-y-0.5 shadow-md" },
                 "➕ Add to Stronghold"
             )
         )
@@ -1353,7 +1468,7 @@ const RoomBuilderForm = ({ stronghold }) => {
 const RoomsTab = ({ stronghold }) => {
     return (
         React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🏠 Room Builder"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🏠 Room Builder"),
             React.createElement("p", { className: "mb-6" }, "Select rooms to build your stronghold. Costs are calculated based on a base cost, affected by site modifiers and rush charges."),
             React.createElement(RoomBuilderForm, { stronghold: stronghold })
         )
@@ -1411,54 +1526,54 @@ const WallsTab = ({ stronghold }) => {
 
     return (
          React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🧱 Free-Standing Walls"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🧱 Free-Standing Walls"),
             React.createElement("p", { className: "mb-6" }, "Design fortified walls around your stronghold. Cost is calculated per cubic foot."),
             
             React.createElement("div", { className: "space-y-6" },
                 React.createElement("div", { className: "grid md:grid-cols-2 lg:grid-cols-4 gap-6" },
                     React.createElement("div", null,
-                        React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Wall Type"),
-                        React.createElement("select", { value: wallType, onChange: e => setWallType(e.target.value), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80" },
+                        React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Wall Type"),
+                        React.createElement("select", { value: wallType, onChange: e => setWallType(e.target.value), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" },
                             Object.keys(WALL_COSTS).map(type => React.createElement("option", { key: type, value: type }, type.charAt(0).toUpperCase() + type.slice(1)))
                         )
                     ),
                      React.createElement("div", null,
-                        React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Length (ft)"),
-                        React.createElement("input", { type: "number", value: length, onChange: e => setLength(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80"})
+                        React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Length (ft)"),
+                        React.createElement("input", { type: "number", value: length, onChange: e => setLength(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light"})
                     ),
                      React.createElement("div", null,
-                        React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Height (ft)"),
-                        React.createElement("input", { type: "number", value: height, onChange: e => setHeight(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80"})
+                        React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Height (ft)"),
+                        React.createElement("input", { type: "number", value: height, onChange: e => setHeight(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light"})
                     ),
                      React.createElement("div", null,
-                        React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Thickness (ft)"),
-                        React.createElement("input", { type: "number", step: "0.5", value: thickness, onChange: e => setThickness(Math.max(0.5, parseFloat(e.target.value) || 0.5)), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80"})
+                        React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Thickness (ft)"),
+                        React.createElement("input", { type: "number", step: "0.5", value: thickness, onChange: e => setThickness(Math.max(0.5, parseFloat(e.target.value) || 0.5)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light"})
                     )
                 ),
 
-                 React.createElement("div", { className: "bg-wood/10 p-4 rounded-lg border-l-4 border-wood-light space-y-2" },
+                 React.createElement("div", { className: "bg-wood/10 dark:bg-gray-700/30 p-4 rounded-lg border-l-4 border-wood-light dark:border-gray-500 space-y-2" },
                     React.createElement("div", { className: "flex justify-between" }, React.createElement("strong", null, "Volume:"), React.createElement("span", null, `${volume.toFixed(1)} cubic ft`)),
                     React.createElement("div", { className: "flex justify-between" }, React.createElement("strong", null, "Base Cost (per cubic ft):"), React.createElement("span", null, `${baseCostPerFt.toFixed(2)} gp`)),
                     React.createElement("div", { className: "flex justify-between font-bold" }, React.createElement("strong", null, "Base Total Cost:"), React.createElement("span", null, `${baseTotalCost.toFixed(0)} gp`))
                  ),
 
-                 React.createElement("div", { className: "bg-green-900/10 p-4 rounded-lg border-l-4 border-green-600 space-y-4" },
-                     React.createElement("h4", { className: "text-xl font-semibold text-green-800" }, "🏗️ Construction Options"),
-                     React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "⚡ Rush Charge"),
-                     React.createElement("select", { value: rushPercent, onChange: e => setRushPercent(parseInt(e.target.value)), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80" },
+                 React.createElement("div", { className: "bg-green-900/10 dark:bg-green-900/30 p-4 rounded-lg border-l-4 border-green-600 dark:border-green-400 space-y-4" },
+                     React.createElement("h4", { className: "text-xl font-semibold text-green-800 dark:text-green-200" }, "🏗️ Construction Options"),
+                     React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "⚡ Rush Charge"),
+                     React.createElement("select", { value: rushPercent, onChange: e => setRushPercent(parseInt(e.target.value)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" },
                          [0, 10, 20, 30, 40, 50, 60, 70].map(p => React.createElement("option", { key: p, value: p }, p === 0 ? "Standard Construction (0%)" : `Rush ${p}% (+${p}% cost, -${p}% time)`))
                      ),
                      React.createElement("div", { className: "flex justify-between font-bold" }, React.createElement("span", null, "⏱️ Construction Time:"), React.createElement("span", null, `${constructionDays} days`)),
                      React.createElement("div", { className: "flex justify-between font-bold text-lg" }, React.createElement("span", null, "💰 Total Cost (with Rush):"), React.createElement("span", null, `${totalCost.toFixed(0)} gp`))
                  ),
 
-                 React.createElement("div", { className: "bg-blue-900/10 p-4 rounded-lg border-l-4 border-blue-600" },
-                    React.createElement("h4", { className: "text-xl font-semibold text-blue-800" }, "📖 Material Description"),
-                    React.createElement("p", { className: "mt-2 text-wood-text/80 italic" }, description)
+                 React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-4 rounded-lg border-l-4 border-blue-600 dark:border-blue-400" },
+                    React.createElement("h4", { className: "text-xl font-semibold text-blue-800 dark:text-blue-200" }, "📖 Material Description"),
+                    React.createElement("p", { className: "mt-2 text-wood-text/80 dark:text-parchment-bg/70 italic" }, description)
                  ),
                  
-                 React.createElement("div", { className: "bg-red-900/10 p-4 rounded-lg border-l-4 border-red-600" },
-                     React.createElement("h4", { className: "text-xl font-semibold text-red-800" }, "🛡️ Wall Durability (per 5'x5' segment)"),
+                 React.createElement("div", { className: "bg-red-900/10 dark:bg-red-900/30 p-4 rounded-lg border-l-4 border-red-600 dark:border-red-400" },
+                     React.createElement("h4", { className: "text-xl font-semibold text-red-800 dark:text-red-200" }, "🛡️ Wall Durability (per 5'x5' segment)"),
                      durability ? (
                         React.createElement("div", { className: "mt-2 grid grid-cols-3 gap-4 text-center" },
                             React.createElement("div", null, React.createElement("div", { className: "font-bold text-lg" }, durabilityHpDisplay), React.createElement("div", null, "HP")),
@@ -1468,7 +1583,7 @@ const WallsTab = ({ stronghold }) => {
                      ) : React.createElement("p", null, "Select a wall type.")
                  ),
 
-                React.createElement("button", { onClick: handleAddWall, className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg font-bold py-3 px-6 rounded-lg border-2 border-wood-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark transition-all duration-300 transform hover:-translate-y-0.5 shadow-md" },
+                React.createElement("button", { onClick: handleAddWall, className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg dark:from-gold dark:to-gold-dark dark:text-wood-dark font-bold py-3 px-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark dark:hover:from-gold-light dark:hover:to-gold transition-all duration-300 transform hover:-translate-y-0.5 shadow-md" },
                     "➕ Add Wall Section"
                 )
             )
@@ -1587,45 +1702,45 @@ const HirelingForm = ({ stronghold }) => {
     };
     
     return (
-         React.createElement("div", { className: "bg-wood/10 p-6 rounded-lg border-2 border-wood-light space-y-6 mb-8" },
-            React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark -mb-2" }, "Hire New Staff"),
+         React.createElement("div", { className: "bg-wood/10 dark:bg-gray-700/30 p-6 rounded-lg border-2 border-wood-light dark:border-gray-600 space-y-6 mb-8" },
+            React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light -mb-2" }, "Hire New Staff"),
             React.createElement("div", { className: "grid md:grid-cols-2 gap-6" },
                 React.createElement("div", null,
-                    React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Hireling Type"),
-                    React.createElement("select", { value: hirelingKey, onChange: e => setHirelingKey(e.target.value), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80" },
+                    React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Hireling Type"),
+                    React.createElement("select", { value: hirelingKey, onChange: e => setHirelingKey(e.target.value), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" },
                         Object.entries(HIRELING_DATA).map(([key, data]) => (
                             React.createElement("option", { key: key, value: key }, `${data.name} (${data.cost} gp/Woche)`)
                         ))
                     )
                 ),
                  React.createElement("div", null,
-                    React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Quantity"),
-                    React.createElement("input", { type: "number", value: quantity, onChange: e => setQuantity(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold rounded-md bg-white/80" })
+                    React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Quantity"),
+                    React.createElement("input", { type: "number", value: quantity, onChange: e => setQuantity(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" })
                 )
             ),
              React.createElement("div", null,
-                React.createElement("label", { className: "block font-semibold mb-2 text-wood text-lg" }, "Custom Role (Optional)"),
-                React.createElement("input", { type: "text", value: customRole, onChange: e => setCustomRole(e.target.value), placeholder: "e.g., Spy, Gardener, Guard Captain", className: "w-full p-3 border-2 border-gold rounded-md bg-white/80" })
+                React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Custom Role (Optional)"),
+                React.createElement("input", { type: "text", value: customRole, onChange: e => setCustomRole(e.target.value), placeholder: "e.g., Spy, Gardener, Guard Captain", className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" })
             ),
             React.createElement("div", null,
                 React.createElement("div", { className: "flex items-center space-x-3" },
-                    React.createElement("input", { id: "volunteer-check", type: "checkbox", checked: isVolunteer, onChange: e => setIsVolunteer(e.target.checked), className: "h-5 w-5 rounded border-gold text-wood focus:ring-wood-light" }),
-                    React.createElement("label", { htmlFor: "volunteer-check", className: "font-semibold text-wood-dark cursor-pointer" },
+                    React.createElement("input", { id: "volunteer-check", type: "checkbox", checked: isVolunteer, onChange: e => setIsVolunteer(e.target.checked), className: "h-5 w-5 rounded border-gold dark:border-gray-500 text-wood dark:text-gold-dark focus:ring-wood-light dark:focus:ring-gold-light" }),
+                    React.createElement("label", { htmlFor: "volunteer-check", className: "font-semibold text-wood-dark dark:text-gold-light cursor-pointer" },
                         "Hire as Volunteer (2 sp/day)"
                     )
                 ),
-                React.createElement("p", { className: "text-sm text-wood-text/70 mt-1 italic pl-8" },
+                React.createElement("p", { className: "text-sm text-wood-text/70 dark:text-parchment-bg/60 mt-1 italic pl-8" },
                     "Freiwillige können auch ohne ausreichend Ressourcen (Betten, Essen etc.) angeheuert werden."
                 )
             ),
-            React.createElement("div", { className: "bg-parchment-light/50 p-4 rounded-lg text-lg" },
+            React.createElement("div", { className: "bg-parchment-light/50 dark:bg-gray-800/40 p-4 rounded-lg text-lg" },
                 React.createElement("div", { className: "flex justify-between" },
                     React.createElement("span", null, "Total Weekly Cost for Selection:"),
                     React.createElement("span", { className: "font-bold" }, `${totalCost.toFixed(2)} gp`)
                 )
             ),
             !validationResult.isValid && (
-              React.createElement("div", { className: "bg-red-200/50 p-4 rounded-lg border border-red-500 text-red-800 space-y-1" },
+              React.createElement("div", { className: "bg-red-200/50 dark:bg-red-900/40 p-4 rounded-lg border border-red-500 dark:border-red-600 text-red-800 dark:text-red-200 space-y-1" },
                 React.createElement("h4", { className: "font-bold text-lg" }, "Voraussetzungen nicht erfüllt:"),
                 React.createElement("ul", { className: "list-disc list-inside text-sm" },
                   validationResult.messages.map((msg, i) => React.createElement("li", { key: i }, msg))
@@ -1635,7 +1750,7 @@ const HirelingForm = ({ stronghold }) => {
             React.createElement("button", { 
                 onClick: handleAddStaff, 
                 disabled: !validationResult.isValid,
-                className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg font-bold py-3 px-6 rounded-lg border-2 border-wood-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark transition-all duration-300 transform hover:-translate-y-0.5 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+                className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg dark:from-gold dark:to-gold-dark dark:text-wood-dark font-bold py-3 px-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark dark:hover:from-gold-light dark:hover:to-gold transition-all duration-300 transform hover:-translate-y-0.5 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
             },
                 "➕ Add Hireling(s)"
             )
@@ -1702,9 +1817,9 @@ const StaffTab = ({ stronghold }) => {
         const { capacity, demand } = resources[resourceKey];
         const isDeficit = demand > capacity;
         return (
-            React.createElement("div", { className: `flex justify-between items-baseline p-1 rounded ${isDeficit ? 'bg-red-300/50' : ''}` },
+            React.createElement("div", { className: `flex justify-between items-baseline p-1 rounded ${isDeficit ? 'bg-red-300/50 dark:bg-red-900/40' : ''}` },
                 React.createElement("span", null, `${label}:`),
-                React.createElement("span", { className: `font-bold text-lg ${isDeficit ? 'text-red-800' : ''}` }, `${demand} / ${capacity}`)
+                React.createElement("span", { className: `font-bold text-lg ${isDeficit ? 'text-red-800 dark:text-red-300' : ''}` }, `${demand} / ${capacity}`)
             )
         );
     };
@@ -1715,7 +1830,7 @@ const StaffTab = ({ stronghold }) => {
             React.createElement("button", {
                 onClick: () => handleDismissal(staffId),
                 title: isPending ? 'Confirm Dismissal' : 'Dismiss Staff',
-                className: `text-sm font-bold transition-all duration-200 rounded px-2 py-1 ${isPending ? 'bg-yellow-500 text-black animate-pulse' : 'text-red-700 hover:bg-red-200'}`
+                className: `text-sm font-bold transition-all duration-200 rounded px-2 py-1 ${isPending ? 'bg-yellow-500 text-black animate-pulse' : 'text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-800'}`
             },
                 isPending ? 'Confirm?' : '👢'
             )
@@ -1724,11 +1839,11 @@ const StaffTab = ({ stronghold }) => {
 
     return (
         React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "👥 Staff & Hirelings"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "👥 Staff & Hirelings"),
             React.createElement("p", { className: "mb-6" }, "Hire staff and assign them to jobs within your stronghold. Drag and drop 'Skilled Hirelings' to assign them."),
             React.createElement(HirelingForm, { stronghold: stronghold }),
-            React.createElement("div", { className: "bg-wood/10 p-6 rounded-lg border-2 border-wood-light space-y-2 mb-8" },
-                React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-2 text-center" }, "🛏️ Unterkünfte des Personals"),
+            React.createElement("div", { className: "bg-wood/10 dark:bg-gray-700/30 p-6 rounded-lg border-2 border-wood-light dark:border-gray-600 space-y-2 mb-8" },
+                React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-2 text-center" }, "🛏️ Unterkünfte des Personals"),
                 React.createElement(ResourceRow, { label: "Dienerquartiere", resourceKey: "servantQuarterSpace" }),
                 React.createElement(ResourceRow, { label: "Kasernen", resourceKey: "barracksSpace" }),
                 React.createElement(ResourceRow, { label: "Schlafzimmer", resourceKey: "bedroomSpace" }),
@@ -1736,8 +1851,8 @@ const StaffTab = ({ stronghold }) => {
             ),
             React.createElement("div", { className: "grid lg:grid-cols-2 gap-8" },
                 React.createElement("div", { onDrop: handleDropOnAvailable, onDragOver: allowDrop },
-                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-4" }, "✅ Available Staff"),
-                    React.createElement("div", { className: "bg-wood/5 p-4 rounded-lg min-h-[300px] border-2 border-dashed border-wood-light/50 space-y-2" },
+                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "✅ Available Staff"),
+                    React.createElement("div", { className: "bg-wood/5 dark:bg-gray-800/20 p-4 rounded-lg min-h-[300px] border-2 border-dashed border-wood-light/50 dark:border-gray-600/50 space-y-2" },
                         availableStaff.length > 0 ? availableStaff.map(s => {
                             const isSkilled = s.hirelingKey === 'skilled';
                             return (
@@ -1745,50 +1860,50 @@ const StaffTab = ({ stronghold }) => {
                                      draggable: isSkilled, 
                                      onDragStart: isSkilled ? (e) => handleDragStart(e, s.id) : undefined,
                                      title: !isSkilled ? "Nur Fachkräfte (Skilled Hirelings) können zugewiesen werden." : s.customRole || s.hirelingType,
-                                     className: `p-3 bg-parchment-light rounded shadow-sm border border-gold-dark hover:shadow-md transition-all ${isSkilled ? 'cursor-grab' : 'cursor-not-allowed opacity-70'}`},
+                                     className: `p-3 bg-parchment-light dark:bg-gray-700 rounded shadow-sm border border-gold-dark dark:border-gray-500 hover:shadow-md transition-all ${isSkilled ? 'cursor-grab' : 'cursor-not-allowed opacity-70'}`},
                                     React.createElement("div", { className: "flex justify-between items-center" },
                                         React.createElement("div", null,
                                             React.createElement("div", { className: "font-bold" }, `${s.customRole || s.hirelingType} (x${s.quantity})`),
-                                            React.createElement("div", { className: "text-sm text-wood-text/80" }, s.isVolunteer ? 'Volunteer' : `${s.totalCost.toFixed(2)} gp/week`)
+                                            React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, s.isVolunteer ? 'Volunteer' : `${s.totalCost.toFixed(2)} gp/week`)
                                         ),
                                         React.createElement(DismissButton, { staffId: s.id })
                                     )
                                 )
                             )
                         }) : (
-                            React.createElement("div", { className: "flex items-center justify-center h-full text-center text-wood-text/70 italic p-8" },
+                            React.createElement("div", { className: "flex items-center justify-center h-full text-center text-wood-text/70 dark:text-parchment-bg/60 italic p-8" },
                                 "No available staff. Hire new staff or unassign them from a job."
                             )
                         )
                     )
                 ),
                 React.createElement("div", null,
-                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-4" }, "📋 Open Positions"),
-                    React.createElement("div", { className: "bg-wood/5 p-4 rounded-lg min-h-[300px] border border-wood-light/50 space-y-2" },
+                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "📋 Open Positions"),
+                    React.createElement("div", { className: "bg-wood/5 dark:bg-gray-800/20 p-4 rounded-lg min-h-[300px] border border-wood-light/50 dark:border-gray-600 space-y-2" },
                         openPositions.length > 0 ? openPositions.map(job => {
                             const assignedStaff = job.filledBy ? staff.find(s => s.id === job.filledBy) : null;
                             return (
                                 React.createElement("div", { key: job.id, onDrop: (e) => handleDropOnJob(e, job), onDragOver: allowDrop,
-                                     className: `p-3 rounded border ${assignedStaff ? 'bg-green-200/80 border-green-700' : 'bg-parchment/60 border-gray-400 border-dashed hover:bg-parchment'}`},
-                                    React.createElement("div", { className: "font-semibold text-wood-dark" }, `${job.role} `, React.createElement("span", { className: "text-sm font-normal text-wood-text/80" }, `(${job.componentName})`)),
+                                     className: `p-3 rounded border ${assignedStaff ? 'bg-green-200/80 dark:bg-green-900/50 border-green-700 dark:border-green-600' : 'bg-parchment/60 dark:bg-gray-700/30 border-gray-400 border-dashed hover:bg-parchment dark:hover:bg-gray-600/50'}`},
+                                    React.createElement("div", { className: "font-semibold text-wood-dark dark:text-gold-light" }, `${job.role} `, React.createElement("span", { className: "text-sm font-normal text-wood-text/80 dark:text-parchment-bg/70" }, `(${job.componentName})`)),
                                     assignedStaff ? (
                                          React.createElement("div", { draggable: true, onDragStart: (e) => handleDragStart(e, assignedStaff.id),
-                                             className: "p-2 mt-1 bg-white rounded shadow-inner cursor-grab"},
+                                             className: "p-2 mt-1 bg-white dark:bg-gray-800 rounded shadow-inner cursor-grab"},
                                             React.createElement("div", { className: "flex justify-between items-center" },
                                                 React.createElement("div", null,
                                                     React.createElement("div", { className: "font-bold" }, assignedStaff.customRole || assignedStaff.hirelingType),
-                                                    React.createElement("div", { className: "text-xs text-wood-text/80" }, assignedStaff.isVolunteer ? 'Volunteer' : `${assignedStaff.totalCost.toFixed(2)} gp/week`)
+                                                    React.createElement("div", { className: "text-xs text-wood-text/80 dark:text-parchment-bg/70" }, assignedStaff.isVolunteer ? 'Volunteer' : `${assignedStaff.totalCost.toFixed(2)} gp/week`)
                                                 ),
                                                 React.createElement(DismissButton, { staffId: assignedStaff.id })
                                             )
                                         )
                                     ) : (
-                                        React.createElement("div", { className: "text-center text-gray-500 italic text-sm p-2" }, "Drop staff here")
+                                        React.createElement("div", { className: "text-center text-gray-500 dark:text-gray-400 italic text-sm p-2" }, "Drop staff here")
                                     )
                                 )
                             )
                         }) : (
-                             React.createElement("div", { className: "flex items-center justify-center h-full text-center text-wood-text/70 italic p-8" },
+                             React.createElement("div", { className: "flex items-center justify-center h-full text-center text-wood-text/70 dark:text-parchment-bg/60 italic p-8" },
                                 "No open positions available. Construct buildings that require staff."
                             )
                         )
@@ -1812,7 +1927,7 @@ const SocialTab = ({ stronghold }) => {
     const savings = baseStaffTotalWeekly - staffTotalWeekly;
 
     const InfoRowSocial = ({ label, value, tooltip, className = '' }) => (
-        React.createElement("div", { className: `flex justify-between items-center py-2 border-b border-wood-light/30 ${className}`, title: tooltip },
+        React.createElement("div", { className: `flex justify-between items-center py-2 border-b border-wood-light/30 dark:border-parchment-bg/20 ${className}`, title: tooltip },
             React.createElement("span", null, `${label}:`),
             React.createElement("span", { className: "font-bold text-lg" }, value)
         )
@@ -1820,12 +1935,12 @@ const SocialTab = ({ stronghold }) => {
 
     return (
         React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🤝 Soziales & Moral"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🤝 Soziales & Moral"),
             React.createElement("p", { className: "mb-6" }, "Soziale Gebäude verbessern die Lebensqualität und Moral deiner Angestellten. Eine hohe Moral führt zu geringeren Gehaltsforderungen, da die Angestellten zufriedener sind."),
             React.createElement("div", { className: "grid md:grid-cols-1 lg:grid-cols-2 gap-8" },
-                React.createElement("div", { className: "bg-blue-900/10 p-6 rounded-lg border-2 border-blue-800/50 shadow-lg" },
-                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900" }, "Berechnung der Gehaltsreduktion"),
-                    React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
+                React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-6 rounded-lg border-2 border-blue-800/50 dark:border-blue-500/50 shadow-lg" },
+                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900 dark:text-blue-200" }, "Berechnung der Gehaltsreduktion"),
+                    React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
                         React.createElement(InfoRowSocial, { 
                             label: "Sozialer Wert (SV)", 
                             value: `${socialValue.toFixed(0)} GP`, 
@@ -1836,15 +1951,15 @@ const SocialTab = ({ stronghold }) => {
                             value: `${comparisonValue.toFixed(0)} GP`, 
                             tooltip: "Die doppelte Summe des militärischen, industriellen und ökonomischen Wertes. Dient als Maßstab für die 'produktive' Größe der Festung." 
                         }),
-                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-blue-800/40 pt-3 mt-3 font-bold text-xl text-blue-800" },
+                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-blue-800/40 dark:border-blue-400/40 pt-3 mt-3 font-bold text-xl text-blue-800 dark:text-blue-200" },
                             React.createElement("span", null, "Gehaltsreduktion:"),
                             React.createElement("span", null, `${salaryReductionPercentage.toFixed(2)}%`)
                         )
                     )
                 ),
-                React.createElement("div", { className: "bg-green-900/10 p-6 rounded-lg border-2 border-green-800/50 shadow-lg" },
-                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-green-900" }, "Auswirkung auf Gehälter"),
-                     React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
+                React.createElement("div", { className: "bg-green-900/10 dark:bg-green-900/30 p-6 rounded-lg border-2 border-green-800/50 dark:border-green-500/50 shadow-lg" },
+                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-green-900 dark:text-green-200" }, "Auswirkung auf Gehälter"),
+                     React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
                         React.createElement(InfoRowSocial, { 
                             label: "Ursprüngliche Gehälter", 
                             value: `${baseStaffTotalWeekly.toFixed(2)} GP/Woche`
@@ -1852,9 +1967,9 @@ const SocialTab = ({ stronghold }) => {
                         React.createElement(InfoRowSocial, { 
                             label: "Einsparung", 
                             value: `-${savings.toFixed(2)} GP/Woche`,
-                            className: 'text-yellow-600'
+                            className: 'text-yellow-600 dark:text-yellow-400'
                         }),
-                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-green-800/40 pt-3 mt-3 font-bold text-xl text-green-800" },
+                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-green-800/40 dark:border-green-400/40 pt-3 mt-3 font-bold text-xl text-green-800 dark:text-green-200" },
                             React.createElement("span", null, "Endgültige Gehälter:"),
                             React.createElement("span", null, `${staffTotalWeekly.toFixed(2)} GP/Woche`)
                         )
@@ -1926,27 +2041,27 @@ const ConstructionTab = ({ stronghold }) => {
         }, [item.startDate, currentDate, totalDays, item.constructionStatus]);
 
         return (
-            React.createElement("div", { className: "bg-parchment-light/50 p-4 rounded-md border border-gold-dark space-y-3 shadow-sm" },
+            React.createElement("div", { className: "bg-parchment-light/50 dark:bg-gray-700/40 p-4 rounded-md border border-gold-dark dark:border-gray-600 space-y-3 shadow-sm" },
                 React.createElement("div", { className: "flex justify-between items-start" },
                     React.createElement("div", null,
-                        React.createElement("div", { className: "font-semibold text-wood text-lg" }, `${item.name} ${item.itemType === 'wall' && 'Wall'}`),
-                        React.createElement("div", { className: "text-sm text-wood-text/80" }, `Cost: ${item.totalCost.toFixed(0)} gp | Time: ${totalDays} days`)
+                        React.createElement("div", { className: "font-semibold text-wood dark:text-gold-light text-lg" }, `${item.name} ${item.itemType === 'wall' && 'Wall'}`),
+                        React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, `Cost: ${item.totalCost.toFixed(0)} gp | Time: ${totalDays} days`)
                     ),
                     React.createElement("button", { 
                         onClick: handleCancel, 
                         title: isPendingCancel ? 'Confirm Cancellation' : "Cancel Construction", 
-                        className: `font-bold text-xl leading-none transition-all duration-200 ${isPendingCancel ? 'text-white bg-red-600 rounded px-2 text-sm' : 'text-red-700 hover:text-red-500'}`
+                        className: `font-bold text-xl leading-none transition-all duration-200 ${isPendingCancel ? 'text-white bg-red-600 rounded px-2 text-sm' : 'text-red-700 dark:text-red-400 hover:text-red-500'}`
                     },
                         isPendingCancel ? 'Confirm?' : '×'
                     )
                 ),
                 item.constructionStatus === 'in_progress' && (
                     React.createElement("div", null,
-                        React.createElement("div", { className: "text-sm flex justify-between text-wood-text/90" },
+                        React.createElement("div", { className: "text-sm flex justify-between text-wood-text/90 dark:text-parchment-bg/80" },
                             React.createElement("span", null, `Started: ${new Date(item.startDate).toLocaleDateString()}`),
                             React.createElement("span", null, `Progress: ${daysElapsed} / ${totalDays} days`)
                         ),
-                        React.createElement("div", { className: "w-full h-4 bg-parchment rounded-full overflow-hidden border border-wood-light mt-1" },
+                        React.createElement("div", { className: "w-full h-4 bg-parchment dark:bg-gray-800 rounded-full overflow-hidden border border-wood-light dark:border-gray-600 mt-1" },
                             React.createElement("div", { style: { width: `${completionPercentage}%` }, className: "h-full bg-gradient-to-r from-green-500 to-green-700 transition-all duration-300 text-right pr-2 text-white text-xs flex items-center justify-end" },
                                 `${completionPercentage.toFixed(0)}%`
                             )
@@ -1971,24 +2086,24 @@ const ConstructionTab = ({ stronghold }) => {
 
     return (
          React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🏗️ Construction Projects"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🏗️ Construction Projects"),
             React.createElement("p", { className: "mb-6" }, "Manage the construction of your stronghold components. Start projects from the pending queue and mark them as complete once finished."),
-            React.createElement("div", { className: "mb-8 bg-wood/10 p-4 rounded-lg border-2 border-wood-light" },
-                React.createElement("label", { htmlFor: "currentDate", className: "block font-semibold mb-2 text-wood text-lg" }, "📅 Current In-Game Date"),
-                React.createElement("input", { id: "currentDate", type: "date", value: currentDate, onChange: e => setCurrentDate(e.target.value), className: "w-full md:w-auto p-2 rounded border-2 border-gold bg-white/80"}),
-                React.createElement("p", { className: "text-sm mt-2 text-wood-text/80 italic" }, "Set the current date to see construction progress on active projects.")
+            React.createElement("div", { className: "mb-8 bg-wood/10 dark:bg-gray-700/30 p-4 rounded-lg border-2 border-wood-light dark:border-gray-600" },
+                React.createElement("label", { htmlFor: "currentDate", className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "📅 Current In-Game Date"),
+                React.createElement("input", { id: "currentDate", type: "date", value: currentDate, onChange: e => setCurrentDate(e.target.value), className: "w-full md:w-auto p-2 rounded border-2 border-gold dark:border-gray-500 bg-white/80 dark:bg-gray-700 dark:text-parchment-light"}),
+                React.createElement("p", { className: "text-sm mt-2 text-wood-text/80 dark:text-parchment-bg/70 italic" }, "Set the current date to see construction progress on active projects.")
             ),
             React.createElement("div", { className: "grid md:grid-cols-1 lg:grid-cols-2 gap-8" },
                 React.createElement("div", null,
-                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-4" }, "⏳ Pending Construction"),
-                    React.createElement("div", { className: "space-y-4 bg-wood/5 p-4 rounded-lg max-h-[60vh] overflow-y-auto border border-wood-light/50" },
-                        pending.length > 0 ? pending.map(item => React.createElement(QueueItemCard, { key: `${item.itemType}-${item.id}`, item: item })) : React.createElement("p", { className: "text-center text-wood-text/70 italic py-8" }, "No pending projects. Add rooms or walls to begin.")
+                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "⏳ Pending Construction"),
+                    React.createElement("div", { className: "space-y-4 bg-wood/5 dark:bg-gray-800/20 p-4 rounded-lg max-h-[60vh] overflow-y-auto border border-wood-light/50 dark:border-gray-600" },
+                        pending.length > 0 ? pending.map(item => React.createElement(QueueItemCard, { key: `${item.itemType}-${item.id}`, item: item })) : React.createElement("p", { className: "text-center text-wood-text/70 dark:text-parchment-bg/60 italic py-8" }, "No pending projects. Add rooms or walls to begin.")
                     )
                 ),
                  React.createElement("div", null,
-                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-4" }, "🛠️ In Progress"),
-                     React.createElement("div", { className: "space-y-4 bg-wood/5 p-4 rounded-lg max-h-[60vh] overflow-y-auto border border-wood-light/50" },
-                        inProgress.length > 0 ? inProgress.map(item => React.createElement(QueueItemCard, { key: `${item.itemType}-${item.id}`, item: item })) : React.createElement("p", { className: "text-center text-wood-text/70 italic py-8" }, "No projects currently under construction.")
+                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "🛠️ In Progress"),
+                     React.createElement("div", { className: "space-y-4 bg-wood/5 dark:bg-gray-800/20 p-4 rounded-lg max-h-[60vh] overflow-y-auto border border-wood-light/50 dark:border-gray-600" },
+                        inProgress.length > 0 ? inProgress.map(item => React.createElement(QueueItemCard, { key: `${item.itemType}-${item.id}`, item: item })) : React.createElement("p", { className: "text-center text-wood-text/70 dark:text-parchment-bg/60 italic py-8" }, "No projects currently under construction.")
                     )
                 )
             )
@@ -1998,19 +2113,19 @@ const ConstructionTab = ({ stronghold }) => {
 
 // --- From components/SummaryTab.tsx ---
 const SummarySection = ({ title, icon, children }) => (
-    React.createElement("div", { className: "bg-gradient-to-br from-gold/80 to-gold-dark/80 text-wood-dark p-6 rounded-lg border-2 border-wood-dark shadow-lg" },
+    React.createElement("div", { className: "bg-gradient-to-br from-gold/80 to-gold-dark/80 dark:from-gray-700 dark:to-gray-800 text-wood-dark dark:text-gold-light p-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark shadow-lg" },
         React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4" }, `${icon} ${title}`),
-        React.createElement("div", { className: "space-y-2 bg-black/10 p-4 rounded" }, children)
+        React.createElement("div", { className: "space-y-2 bg-black/10 dark:bg-black/20 p-4 rounded" }, children)
     )
 );
 const SummaryRow = ({ label, value, isNegative = false, className }) => (
     React.createElement("div", { className: `flex justify-between items-baseline ${className}` },
         React.createElement("span", null, `${label}:`),
-        React.createElement("span", { className: `font-bold text-lg ${isNegative ? 'text-red-800' : ''}` }, value)
+        React.createElement("span", { className: `font-bold text-lg ${isNegative ? 'text-red-800 dark:text-red-400' : ''}` }, value)
     )
 );
 const SummaryTotalRow = ({ label, value, isNegative = false }) => (
-     React.createElement("div", { className: `flex justify-between items-baseline border-t-2 border-wood-light/50 pt-2 mt-2 font-bold text-xl ${isNegative ? 'text-red-900' : 'text-green-900'}` },
+     React.createElement("div", { className: `flex justify-between items-baseline border-t-2 border-wood-light/50 dark:border-gold-dark/50 pt-2 mt-2 font-bold text-xl ${isNegative ? 'text-red-900 dark:text-red-300' : 'text-green-900 dark:text-green-300'}` },
         React.createElement("span", null, `${label}:`),
         React.createElement("span", null, value)
     )
@@ -2028,10 +2143,10 @@ const SUMMARY_RESOURCE_LABELS = {
     stallSpace: "Stall Space"
 };
 const AssetSection = ({ title, value, children }) => (
-    React.createElement("div", { className: "bg-parchment/70 p-4 rounded-lg border border-wood-light shadow-md" },
-        React.createElement("div", { className: "flex justify-between items-center pb-2 mb-2 border-b border-wood-light/30" },
-            React.createElement("h4", { className: "text-xl font-semibold text-wood-dark" }, title),
-            React.createElement("span", { className: "font-bold text-wood" }, `${value.toFixed(0)} GP`)
+    React.createElement("div", { className: "bg-parchment/70 dark:bg-gray-700/50 p-4 rounded-lg border border-wood-light dark:border-gray-600 shadow-md" },
+        React.createElement("div", { className: "flex justify-between items-center pb-2 mb-2 border-b border-wood-light/30 dark:border-gray-500/50" },
+            React.createElement("h4", { className: "text-xl font-semibold text-wood-dark dark:text-gold-light" }, title),
+            React.createElement("span", { className: "font-bold text-wood dark:text-gold-light" }, `${value.toFixed(0)} GP`)
         ),
         React.createElement("div", { className: "space-y-2 max-h-60 overflow-y-auto pr-2" },
             children
@@ -2039,10 +2154,10 @@ const AssetSection = ({ title, value, children }) => (
     )
 );
 const AssetItem = ({ item, isPending, onDelete }) => (
-    React.createElement("div", { className: "flex justify-between items-center bg-parchment-light/50 p-2 rounded-md" },
+    React.createElement("div", { className: "flex justify-between items-center bg-parchment-light/50 dark:bg-gray-800/50 p-2 rounded-md" },
         React.createElement("div", null,
             React.createElement("div", { className: "font-semibold" }, item.name),
-            React.createElement("div", { className: "text-sm text-wood-text/80" }, `${item.totalCost.toFixed(0)} GP`)
+            React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, `${item.totalCost.toFixed(0)} GP`)
         ),
         React.createElement("button", {
             onClick: onDelete,
@@ -2106,10 +2221,10 @@ const SaveLoadManager = ({ stronghold }) => {
 
 
     return (
-        React.createElement("div", { className: "mt-12 bg-gradient-to-br from-parchment to-parchment-dark p-6 rounded-lg border-2 border-wood shadow-lg" },
-            React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark" }, "💾 Spielstände Verwalten"),
+        React.createElement("div", { className: "mt-12 bg-gradient-to-br from-parchment to-parchment-dark dark:from-gray-800 dark:to-gray-900 p-6 rounded-lg border-2 border-wood dark:border-wood-dark shadow-lg" },
+            React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark dark:text-gold-light" }, "💾 Spielstände Verwalten"),
             React.createElement("div", { className: "space-y-4" },
-                React.createElement("div", { className: "bg-black/10 p-4 rounded space-y-3" },
+                React.createElement("div", { className: "bg-black/10 dark:bg-black/20 p-4 rounded space-y-3" },
                     React.createElement("label", { htmlFor: "new-save-name", className: "block font-semibold text-center" }, "Neuen Spielstand anlegen"),
                     React.createElement("div", { className: "flex space-x-2" },
                         React.createElement("input", {
@@ -2118,7 +2233,7 @@ const SaveLoadManager = ({ stronghold }) => {
                             value: newSaveName,
                             onChange: e => setNewSaveName(e.target.value),
                             placeholder: "Name des Spielstands",
-                            className: "w-full p-2 border-2 border-gold rounded-md bg-white/80"
+                            className: "w-full p-2 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light"
                         }),
                         React.createElement("button", { onClick: handleSaveAs, className: "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded whitespace-nowrap" }, "Speichern als...")
                     )
@@ -2126,7 +2241,7 @@ const SaveLoadManager = ({ stronghold }) => {
 
                 React.createElement("div", { className: "space-y-2 max-h-60 overflow-y-auto pr-2" },
                     saveSlots.length > 0 ? saveSlots.map(slot => (
-                        React.createElement("div", { key: slot.name, className: `p-3 rounded border-2 flex flex-col sm:flex-row justify-between items-center gap-2 ${slot.name === activeSaveName ? 'bg-gold-light border-wood-dark' : 'bg-parchment-light border-gold-dark'}` },
+                        React.createElement("div", { key: slot.name, className: `p-3 rounded border-2 flex flex-col sm:flex-row justify-between items-center gap-2 ${slot.name === activeSaveName ? 'bg-gold-light dark:bg-gold-dark/50 border-wood-dark dark:border-gold-light' : 'bg-parchment-light dark:bg-gray-700/50 border-gold-dark dark:border-gray-600'}` },
                             editingName === slot.name ? (
                                 React.createElement("div", { className: "flex-1 w-full sm:w-auto" },
                                     React.createElement("input", { 
@@ -2135,13 +2250,13 @@ const SaveLoadManager = ({ stronghold }) => {
                                         onChange: e => setCurrentEditedName(e.target.value),
                                         onKeyDown: e => e.key === 'Enter' && handleConfirmRename(),
                                         autoFocus: true,
-                                        className: "w-full p-1 border-2 border-wood rounded-md bg-white"
+                                        className: "w-full p-1 border-2 border-wood rounded-md bg-white dark:bg-gray-800 dark:text-parchment-light"
                                     })
                                 )
                             ) : (
                                 React.createElement("div", null,
                                     React.createElement("p", { className: "font-bold" }, slot.name),
-                                    React.createElement("p", { className: "text-xs text-wood-text/80" }, `Zuletzt gespeichert: ${new Date(slot.lastSaved).toLocaleString()}`)
+                                    React.createElement("p", { className: "text-xs text-wood-text/80 dark:text-parchment-bg/70" }, `Zuletzt gespeichert: ${new Date(slot.lastSaved).toLocaleString()}`)
                                 )
                             ),
                             
@@ -2165,7 +2280,7 @@ const SaveLoadManager = ({ stronghold }) => {
                                 )
                             )
                         )
-                    )) : React.createElement("p", { className: "text-center italic text-wood-text/70" }, "Keine Spielstände vorhanden.")
+                    )) : React.createElement("p", { className: "text-center italic text-wood-text/70 dark:text-parchment-bg/60" }, "Keine Spielstände vorhanden.")
                 )
             )
         )
@@ -2254,17 +2369,32 @@ const SummaryTab = ({ stronghold }) => {
         });
         return sources;
     }, []);
+    
+    const sortedPerks = useMemo(() => {
+        const activePerkIds = new Set([
+            ...staticPerks.map(p => p.id),
+            ...Object.keys(scaledBonuses)
+        ]);
+
+        return [...ALL_PERKS].sort((a, b) => {
+            const aIsActive = activePerkIds.has(a.id);
+            const bIsActive = activePerkIds.has(b.id);
+            if (aIsActive && !bIsActive) return -1;
+            if (!bIsActive && aIsActive) return 1;
+            return a.name.localeCompare(b.name);
+        });
+    }, [staticPerks, scaledBonuses]);
 
     const PerkDisplay = ({ perk, bonus, isActive, sources }) => (
-        React.createElement("div", { title: `${perk.description}\nWird bereitgestellt von: ${sources}`, className: `p-2 rounded border-2 transition-colors ${isActive ? 'bg-green-200/80 border-green-700' : 'bg-parchment/60 border-wood-light/50'}` },
+        React.createElement("div", { title: `${perk.description}\nWird bereitgestellt von: ${sources}`, className: `p-2 rounded border-2 transition-colors ${isActive ? 'bg-green-200/80 dark:bg-green-900/50 border-green-700 dark:border-green-500' : 'bg-parchment/60 dark:bg-gray-700/40 border-wood-light/50 dark:border-gray-600/50'}` },
             React.createElement("div", { className: "font-bold" }, `${perk.name} ${bonus ? `+${bonus}` : ''}`),
-            React.createElement("div", { className: `text-sm italic ${isActive ? 'text-green-900/80' : 'text-wood-text/70'}` }, isActive ? 'Aktiv' : 'Inaktiv')
+            React.createElement("div", { className: `text-sm italic ${isActive ? 'text-green-900/80 dark:text-green-300/80' : 'text-wood-text/70 dark:text-parchment-bg/60'}` }, isActive ? 'Aktiv' : 'Inaktiv')
         )
     );
 
     return (
         React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "📊 Stronghold Summary"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "📊 Stronghold Summary"),
             React.createElement("p", { className: "mb-6" }, "A complete overview of your fortress, its construction, and its ongoing costs."),
              React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-8" },
                 React.createElement("div", { className: "space-y-8" },
@@ -2273,7 +2403,7 @@ const SummaryTab = ({ stronghold }) => {
                         React.createElement(SummaryRow, { label: "Industrieller Wert", value: `${industrialValue.toFixed(0)} gp` }),
                         React.createElement(SummaryRow, { label: "Ökonomischer Wert", value: `${economicValue.toFixed(0)} gp` }),
                         React.createElement(SummaryRow, { label: "Sozialer Wert", value: `${socialValue.toFixed(0)} gp` }),
-                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 pt-2 mt-2 font-bold text-xl" },
+                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 dark:border-gold-dark/50 pt-2 mt-2 font-bold text-xl" },
                             React.createElement("span", null, "TOTAL VALUE:"),
                             React.createElement("span", null, `${totalValue.toFixed(0)} gp`)
                         )
@@ -2283,19 +2413,18 @@ const SummaryTab = ({ stronghold }) => {
                             const resource = resources[key];
                             if (!resource || (resource.capacity === 0 && resource.demand === 0 && key !== 'storage')) return null;
                             const isDeficit = resource.demand > resource.capacity;
-                            return React.createElement(SummaryRow, { key: key, label: SUMMARY_RESOURCE_LABELS[key], value: key === 'storage' ? `${resource.capacity}` : `${resource.demand} / ${resource.capacity}`, isNegative: isDeficit, className: isDeficit ? 'bg-red-300/50 -mx-2 px-2 rounded' : ''});
+                            return React.createElement(SummaryRow, { key: key, label: SUMMARY_RESOURCE_LABELS[key], value: key === 'storage' ? `${resource.capacity}` : `${resource.demand} / ${resource.capacity}`, isNegative: isDeficit, className: isDeficit ? 'bg-red-300/50 dark:bg-red-900/40 -mx-2 px-2 rounded' : ''});
                         })
                     ),
                     React.createElement(SummarySection, { title: "Construction Details", icon: "🏗️" },
                         React.createElement(SummaryRow, { label: "Total Area", value: `${totalArea} sq ft` }),
-                        React.createElement(SummaryRow, { label: "Workers Required (Est.)", value: "N/A" }),
                         React.createElement(SummaryRow, { label: "Remaining Build Time", value: `${totalConstructionDays} days` })
                     )
                 ),
                 React.createElement("div", { className: "space-y-8" },
                     React.createElement(SummarySection, { title: "Fähigkeiten der Festung", icon: "🌟" },
                         React.createElement("div", { className: "space-y-2 max-h-[60vh] overflow-y-auto" },
-                             ALL_PERKS.map(perk => {
+                             sortedPerks.map(perk => {
                                 const activeScaledBonus = scaledBonuses[perk.id];
                                 const isActiveStatic = staticPerks.some(p => p.id === perk.id);
                                 const isActive = !!activeScaledBonus || isActiveStatic;
@@ -2308,10 +2437,10 @@ const SummaryTab = ({ stronghold }) => {
                     React.createElement(SummarySection, { title: "Beschädigungen", icon: "🩹" },
                         React.createElement(SummaryRow, { label: "Gesamtschaden", value: `${totalDamage.toFixed(0)} GP`, isNegative: totalDamage > 0 }),
                         totalDamage > 0 && (
-                            React.createElement("div", { className: "mt-4 pt-3 border-t-2 border-wood-light/30 space-y-2" },
+                            React.createElement("div", { className: "mt-4 pt-3 border-t-2 border-wood-light/30 dark:border-gold-dark/30 space-y-2" },
                                 React.createElement("label", { htmlFor: "repair-amount", className: "block text-center font-semibold" }, "Schaden reparieren:"),
                                 React.createElement("div", { className: "flex items-center space-x-2" },
-                                React.createElement("input", { id: "repair-amount", type: "number", value: repairAmount, onChange: (e) => setRepairAmount(Math.max(0, Math.min(Math.ceil(totalDamage), parseInt(e.target.value) || 0))), className: "w-full p-2 border-2 border-gold rounded-md bg-white/80"}),
+                                React.createElement("input", { id: "repair-amount", type: "number", value: repairAmount, onChange: (e) => setRepairAmount(Math.max(0, Math.min(Math.ceil(totalDamage), parseInt(e.target.value) || 0))), className: "w-full p-2 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light"}),
                                 React.createElement("button", { onClick: handleRepair, className: "p-2 rounded bg-green-600 text-white font-bold hover:bg-green-700 transition-colors whitespace-nowrap" }, "Reparieren")
                                 )
                             )
@@ -2320,46 +2449,46 @@ const SummaryTab = ({ stronghold }) => {
                 )
             ),
             React.createElement("div", { className: "mt-8" },
-                React.createElement("div", { className: "bg-gradient-to-br from-gold/80 to-gold-dark/80 text-wood-dark p-6 rounded-lg border-2 border-wood-dark shadow-lg" },
+                React.createElement("div", { className: "bg-gradient-to-br from-gold/80 to-gold-dark/80 dark:from-gray-700 dark:to-gray-800 text-wood-dark dark:text-gold-light p-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark shadow-lg" },
                     React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4" }, "💰 Weekly Finances"),
                     React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-6" },
-                        React.createElement("div", { className: "bg-black/10 p-4 rounded" },
-                            React.createElement("h4", { className: "font-bold text-center text-lg text-green-800 mb-2" }, "📈 Income"),
+                        React.createElement("div", { className: "bg-black/10 dark:bg-black/20 p-4 rounded" },
+                            React.createElement("h4", { className: "font-bold text-center text-lg text-green-800 dark:text-green-300 mb-2" }, "📈 Income"),
                             React.createElement(SummaryRow, { label: "Industrial Profit", value: `+${industrialPotential.toFixed(2)} gp` }),
                             React.createElement(SummaryRow, { label: "Economic Profit", value: `+${economicPotential.toFixed(2)} gp` }),
                             React.createElement(SummaryTotalRow, { label: "TOTAL PROFIT", value: `+${weeklyProfit.toFixed(2)} gp`, isNegative: false })
                         ),
-                        React.createElement("div", { className: "bg-black/10 p-4 rounded" },
-                            React.createElement("h4", { className: "font-bold text-center text-lg text-red-800 mb-2" }, "📉 Expenses"),
+                        React.createElement("div", { className: "bg-black/10 dark:bg-black/20 p-4 rounded" },
+                            React.createElement("h4", { className: "font-bold text-center text-lg text-red-800 dark:text-red-300 mb-2" }, "📉 Expenses"),
                             React.createElement(SummaryRow, { label: "Staff Salaries", value: `-${staffTotalWeekly.toFixed(2)} gp`, isNegative: true }),
                             React.createElement(SummaryRow, { label: "Maintenance", value: `-${maintenanceWeekly.toFixed(2)} gp`, isNegative: true }),
                             React.createElement(SummaryTotalRow, { label: "TOTAL UPKEEP", value: `-${weeklyUpkeep.toFixed(2)} gp`, isNegative: true })
                         )
                     ),
-                    React.createElement("div", { className: `text-center border-t-4 border-wood-dark/50 mt-6 pt-4 font-bold text-2xl ${netWeeklyIncome >= 0 ? 'text-green-900' : 'text-red-900'}` },
+                    React.createElement("div", { className: `text-center border-t-4 border-wood-dark/50 dark:border-gold-dark/50 mt-6 pt-4 font-bold text-2xl ${netWeeklyIncome >= 0 ? 'text-green-900 dark:text-green-300' : 'text-red-900 dark:text-red-300'}` },
                         "Net Weekly Income: ",
                         React.createElement("span", { className: "text-3xl ml-2" }, `${netWeeklyIncome.toFixed(2)} gp`)
                     )
                 )
             ),
             React.createElement("div", { className: "mt-12" },
-                React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-4 text-center" }, "🏰 Anlagen der Festung"),
+                React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-4 text-center" }, "🏰 Anlagen der Festung"),
                 React.createElement("div", { className: "grid md:grid-cols-2 gap-6" },
-                    React.createElement(AssetSection, { title: "Militärische Gebäude", value: militaryValue }, groupedComponents.military.length > 0 ? groupedComponents.military.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70" }, "Keine")),
-                    React.createElement(AssetSection, { title: "Industrielle Gebäude", value: industrialValue }, groupedComponents.industrial.length > 0 ? groupedComponents.industrial.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70" }, "Keine")),
-                    React.createElement(AssetSection, { title: "Ökonomische Gebäude", value: economicValue }, groupedComponents.economic.length > 0 ? groupedComponents.economic.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70" }, "Keine")),
-                    React.createElement(AssetSection, { title: "Soziale Gebäude", value: socialValue }, groupedComponents.social.length > 0 ? groupedComponents.social.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70" }, "Keine")),
-                    React.createElement("div", { className: "md:col-span-2" }, React.createElement(AssetSection, { title: "Mauern & Befestigungen", value: completedWalls.reduce((acc, w) => acc + w.totalCost, 0) }, completedWalls.length > 0 ? completedWalls.map(w => React.createElement(AssetItem, { key: w.id, item: w, onDelete: () => handleDelete('wall', w.id), isPending: pendingDeletion?.id === w.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70" }, "Keine")))
+                    React.createElement(AssetSection, { title: "Militärische Gebäude", value: militaryValue }, groupedComponents.military.length > 0 ? groupedComponents.military.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70 dark:text-parchment-bg/60" }, "Keine")),
+                    React.createElement(AssetSection, { title: "Industrielle Gebäude", value: industrialValue }, groupedComponents.industrial.length > 0 ? groupedComponents.industrial.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70 dark:text-parchment-bg/60" }, "Keine")),
+                    React.createElement(AssetSection, { title: "Ökonomische Gebäude", value: economicValue }, groupedComponents.economic.length > 0 ? groupedComponents.economic.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70 dark:text-parchment-bg/60" }, "Keine")),
+                    React.createElement(AssetSection, { title: "Soziale Gebäude", value: socialValue }, groupedComponents.social.length > 0 ? groupedComponents.social.map(c => React.createElement(AssetItem, { key: c.id, item: c, onDelete: () => handleDelete('component', c.id), isPending: pendingDeletion?.id === c.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70 dark:text-parchment-bg/60" }, "Keine")),
+                    React.createElement("div", { className: "md:col-span-2" }, React.createElement(AssetSection, { title: "Mauern & Befestigungen", value: completedWalls.reduce((acc, w) => acc + w.totalCost, 0) }, completedWalls.length > 0 ? completedWalls.map(w => React.createElement(AssetItem, { key: w.id, item: w, onDelete: () => handleDelete('wall', w.id), isPending: pendingDeletion?.id === w.id })) : React.createElement("p", { className: "text-center italic text-wood-text/70 dark:text-parchment-bg/60" }, "Keine")))
                 )
             ),
-            React.createElement("div", { className: "mt-12 bg-gradient-to-br from-parchment to-parchment-dark p-6 rounded-lg border-2 border-wood shadow-lg" },
-                React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark" }, "Aktionen"),
+            React.createElement("div", { className: "mt-12 bg-gradient-to-br from-parchment to-parchment-dark dark:from-gray-800 dark:to-gray-900 p-6 rounded-lg border-2 border-wood dark:border-wood-dark shadow-lg" },
+                React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark dark:text-gold-light" }, "Aktionen"),
                 React.createElement("div", { className: "flex flex-wrap justify-center items-center gap-4" },
                     React.createElement("div", { className: "text-center" },
                         React.createElement("button", { onClick: saveCurrentSlot, disabled: !activeSaveName, className: "bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" },
                             "💾 Speichern"
                         ),
-                        React.createElement("p", { className: "text-xs italic text-wood-text/70 mt-1" }, "(Optional, alle Änderungen werden automatisch gespeichert)")
+                        React.createElement("p", { className: "text-xs italic text-wood-text/70 dark:text-parchment-bg/60 mt-1" }, "(Optional, alle Änderungen werden automatisch gespeichert)")
                     ),
                      React.createElement("button", { onClick: handleImportClick, className: "bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors" }, "📤 Importieren"),
                     React.createElement("input", { type: "file", ref: fileInputRef, onChange: handleFileChange, accept: ".json", style: { display: 'none' } }),
@@ -2373,7 +2502,7 @@ const SummaryTab = ({ stronghold }) => {
 
 // --- From components/EconomyTab.tsx ---
 const InfoRow = ({ label, value, tooltip }) => (
-    React.createElement("div", { className: "flex justify-between items-center py-2 border-b border-wood-light/30", title: tooltip },
+    React.createElement("div", { className: "flex justify-between items-center py-2 border-b border-wood-light/30 dark:border-parchment-bg/20", title: tooltip },
         React.createElement("span", null, `${label}:`),
         React.createElement("span", { className: "font-bold text-lg" }, value)
     )
@@ -2392,6 +2521,7 @@ const EconomyTab = ({ stronghold }) => {
         strongholdTreasury,
         depositToTreasury,
         withdrawFromTreasury,
+        economicComponentsBreakdown
     } = stronghold;
 
     const [transactionAmount, setTransactionAmount] = useState('');
@@ -2408,68 +2538,100 @@ const EconomyTab = ({ stronghold }) => {
         setTransactionAmount('');
     };
 
-    return (
-        React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "💰 Wirtschaft"),
-            React.createElement("p", { className: "mb-6" }, "Verwalte die wirtschaftliche Leistung deiner Festung. Industrielle Gebäude produzieren Rohstoffe, die von ökonomischen Gebäuden in Profit umgewandelt werden."),
-            React.createElement("div", { className: "bg-gold/80 p-6 rounded-lg border-2 border-wood-dark shadow-lg mb-8" },
-                React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark" }, "🏰 Schatzkammer der Festung"),
-                React.createElement("div", { className: "text-center mb-4" },
-                    React.createElement("div", { className: "text-lg text-wood-text" }, "Aktuelles Vermögen"),
-                    React.createElement("div", { className: `text-5xl font-bold font-cinzel ${strongholdTreasury < 0 ? 'text-red-800' : 'text-green-800'}` },
-                        `${strongholdTreasury.toFixed(2)} GP`
+    const BreakdownItem = ({ item }) => {
+        const efficiencyPercentage = item.baseValue > 0 ? (item.currentValue / item.baseValue) * 100 : 0;
+        const colorClass = item.classification === 'military' ? 'border-red-500' : item.classification === 'industrial' ? 'border-blue-500' : 'border-green-500';
+
+        return (
+            React.createElement("div", { className: `bg-parchment-light/50 dark:bg-gray-700/50 p-3 rounded-md border-l-4 ${colorClass} shadow-sm space-y-2` },
+                React.createElement("div", { className: "flex justify-between items-start" },
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "font-semibold text-wood dark:text-gold-light text-lg" }, item.name),
+                        item.totalJobs > 0 && React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, `${item.filledJobs}/${item.totalJobs} ${item.jobRole}(s) besetzt`)
                     )
                 ),
-                React.createElement("div", { className: "bg-black/10 p-4 rounded space-y-3" },
-                    React.createElement("label", { htmlFor: "transaction-amount", className: "block font-semibold text-center" }, "Transaktion durchführen"),
-                    React.createElement("input", { 
-                        id: "transaction-amount",
-                        type: "number",
-                        value: transactionAmount,
-                        onChange: e => setTransactionAmount(e.target.value),
-                        placeholder: "Betrag in GP",
-                        className: "w-full p-2 border-2 border-gold rounded-md bg-white/80 text-center",
-                        min: "0"
-                    }),
-                    React.createElement("div", { className: "flex justify-center space-x-4" },
-                        React.createElement("button", { 
-                            onClick: () => handleTransaction('deposit'),
-                            className: "flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors shadow-md"
-                        },
-                            "Einzahlen"
-                        ),
-                        React.createElement("button", { 
-                            onClick: () => handleTransaction('withdraw'),
-                             className: "flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors shadow-md"
-                        },
-                            "Auszahlen"
+                React.createElement("div", null,
+                    React.createElement("div", { className: "text-sm flex justify-between text-wood-text/90 dark:text-parchment-bg/80 mb-1" },
+                        React.createElement("span", null, "Aktueller Wert:"),
+                        React.createElement("span", { className: "font-bold" }, `${item.currentValue.toFixed(0)} / ${item.baseValue.toFixed(0)} GP`)
+                    ),
+                    React.createElement("div", { className: "w-full h-4 bg-parchment dark:bg-gray-800 rounded-full overflow-hidden border border-wood-light dark:border-gray-600" },
+                        React.createElement("div", { style: { width: `${efficiencyPercentage}%` }, className: "h-full bg-gradient-to-r from-yellow-400 to-amber-600 transition-all duration-300 text-right pr-2 text-white text-xs flex items-center justify-end" },
+                            `${efficiencyPercentage.toFixed(0)}%`
                         )
                     )
+                ),
+                item.merchantGoldContribution > 0 && (
+                     React.createElement("div", { className: "text-sm text-green-800 dark:text-green-300 font-semibold pt-1 border-t border-wood/10 dark:border-parchment-bg/10" },
+                        `Händlergold: +${item.merchantGoldContribution.toFixed(2)} GP`
+                    )
                 )
-            ),
+            )
+        );
+    };
+
+    return (
+        React.createElement("div", null,
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "💰 Wirtschaft"),
+            React.createElement("p", { className: "mb-6" }, "Verwalte die wirtschaftliche Leistung deiner Festung. Industrielle Gebäude produzieren Rohstoffe, die von ökonomischen Gebäuden in Profit umgewandelt werden."),
             React.createElement("div", { className: "grid md:grid-cols-2 gap-8" },
-                React.createElement("div", null,
-                    React.createElement("div", { className: "bg-gold/80 p-6 rounded-lg border-2 border-wood-dark shadow-lg mb-8" },
-                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark" }, "Wöchentliche Einnahmen"),
-                        React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
-                            React.createElement(InfoRow, { label: "Industrieller Wert (IV)", value: `${industrialValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller industriellen Gebäude." }),
-                            React.createElement(InfoRow, { label: "Ökonomischer Wert (EV)", value: `${economicValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller ökonomischen Gebäude." }),
-                            React.createElement("hr", { className: "border-wood-light/50 my-2" }),
+                React.createElement("div", { className: "space-y-8" },
+                    React.createElement("div", { className: "bg-gold/80 dark:bg-gray-800/50 p-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark shadow-lg" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark dark:text-gold-light" }, "🏰 Schatzkammer der Festung"),
+                        React.createElement("div", { className: "text-center mb-4" },
+                            React.createElement("div", { className: "text-lg text-wood-text dark:text-parchment-bg/80" }, "Aktuelles Vermögen"),
+                            React.createElement("div", { className: `text-5xl font-bold font-cinzel ${strongholdTreasury < 0 ? 'text-red-800 dark:text-red-400' : 'text-green-800 dark:text-green-300'}` },
+                                `${strongholdTreasury.toFixed(2)} GP`
+                            )
+                        ),
+                        React.createElement("div", { className: "bg-black/10 dark:bg-black/20 p-4 rounded space-y-3" },
+                            React.createElement("label", { htmlFor: "transaction-amount", className: "block font-semibold text-center" }, "Transaktion durchführen"),
+                            React.createElement("input", { 
+                                id: "transaction-amount",
+                                type: "number",
+                                value: transactionAmount,
+                                onChange: e => setTransactionAmount(e.target.value),
+                                placeholder: "Betrag in GP",
+                                className: "w-full p-2 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light text-center",
+                                min: "0"
+                            }),
+                            React.createElement("div", { className: "flex justify-center space-x-4" },
+                                React.createElement("button", { 
+                                    onClick: () => handleTransaction('deposit'),
+                                    className: "flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors shadow-md"
+                                },
+                                    "Einzahlen"
+                                ),
+                                React.createElement("button", { 
+                                    onClick: () => handleTransaction('withdraw'),
+                                    className: "flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors shadow-md"
+                                },
+                                    "Auszahlen"
+                                )
+                            )
+                        )
+                    ),
+                    React.createElement("div", { className: "bg-gold/80 dark:bg-gray-800/50 p-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark shadow-lg" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark dark:text-gold-light" }, "Wöchentliche Einnahmen (Zusammenfassung)"),
+                        React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
+                            React.createElement(InfoRow, { label: "Industrieller Wert (IV)", value: `${industrialValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller industriellen Gebäude, skaliert nach Arbeiterzahl." }),
+                            React.createElement(InfoRow, { label: "Ökonomischer Wert (EV)", value: `${economicValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller ökonomischen Gebäude, skaliert nach Arbeiterzahl." }),
+                            React.createElement("hr", { className: "border-wood-light/50 dark:border-parchment-bg/30 my-2" }),
                             React.createElement(InfoRow, { label: "Industrielles Potential", value: `${industrialPotential.toFixed(2)} GP`, tooltip: "Eigenständiger Profit aus industriellen Gebäuden. Berechnet als: Industrieller Wert × 0.5%." }),
                             React.createElement(InfoRow, { label: "Ökonomisches Potential", value: `${economicPotential.toFixed(2)} GP`, tooltip: "Eigenständiger Profit aus ökonomischen Gebäuden, modifiziert durch industrielle Effizienz. Berechnet als: Ökonomischer Wert × 2.5% × (min(1, Industrieller Wert / Ökonomischer Wert))." }),
-                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 pt-3 mt-3 font-bold text-xl text-green-800", title: "Gesamteinnahmen aus beiden Potentialen (Industrielles Potential + Ökonomisches Potential)" },
+                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 dark:border-gold-dark/50 pt-3 mt-3 font-bold text-xl text-green-800 dark:text-green-300", title: "Gesamteinnahmen aus beiden Potentialen (Industrielles Potential + Ökonomisches Potential)" },
                                 React.createElement("span", null, "Wöchentlicher Gewinn:"),
                                 React.createElement("span", null, `${weeklyProfit.toFixed(2)} GP`)
                             )
                         )
                     ),
                     
-                    React.createElement("div", { className: "bg-gold/80 p-6 rounded-lg border-2 border-wood-dark shadow-lg" },
-                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark" }, "Handelskapital"),
-                        React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
-                            React.createElement(InfoRow, { label: "Wöchentliches Händlergold", value: `${totalMerchantGold.toFixed(2)} GP`, tooltip: "25% des Gesamtwertes aller 'Shop'-Gebäude. Setzt sich wöchentlich zurück." }),
+                    React.createElement("div", { className: "bg-gold/80 dark:bg-gray-800/50 p-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark shadow-lg" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-wood-dark dark:text-gold-light" }, "Handelskapital"),
+                        React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
+                            React.createElement(InfoRow, { label: "Wöchentliches Händlergold", value: `${totalMerchantGold.toFixed(2)} GP`, tooltip: "25% des Gesamtwertes aller 'Shop'-Gebäude (skaliert nach Arbeiterzahl). Setzt sich wöchentlich zurück." }),
                             React.createElement("div", { className: "py-2" },
-                                React.createElement("label", { className: "block font-semibold mb-2 text-wood-text/90" }, "Ausgegebenes Gold diese Woche:"),
+                                React.createElement("label", { className: "block font-semibold mb-2 text-wood-text/90 dark:text-parchment-bg/80" }, "Ausgegebenes Gold diese Woche:"),
                                 React.createElement("input", { 
                                     type: "number",
                                     value: merchantGoldSpentThisWeek,
@@ -2477,12 +2639,12 @@ const EconomyTab = ({ stronghold }) => {
                                         const val = parseFloat(e.target.value) || 0;
                                         setMerchantGoldSpentThisWeek(Math.max(0, Math.min(val, totalMerchantGold)));
                                     },
-                                    className: "w-full p-2 border-2 border-gold rounded-md bg-white/80",
+                                    className: "w-full p-2 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light",
                                     max: totalMerchantGold,
                                     min: 0
                                 })
                             ),
-                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 pt-3 mt-3 font-bold text-xl text-green-800" },
+                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 dark:border-gold-dark/50 pt-3 mt-3 font-bold text-xl text-green-800 dark:text-green-300" },
                                 React.createElement("span", null, "Verbleibendes Gold:"),
                                 React.createElement("span", null, `${(totalMerchantGold - merchantGoldSpentThisWeek).toFixed(2)} GP`)
                             )
@@ -2490,17 +2652,29 @@ const EconomyTab = ({ stronghold }) => {
                     )
 
                 ),
-                React.createElement("div", null,
-                     React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-4" }, "📜 Ereignisprotokoll"),
-                     React.createElement("div", { className: "bg-parchment-light/80 p-4 rounded-lg border border-wood-light h-[800px] overflow-y-auto space-y-2 shadow-inner" },
-                        simulationLog.length > 0 ? (
-                            simulationLog.map((log, index) => (
-                                React.createElement("p", { key: index, className: "text-sm text-wood-text border-b border-wood/20 pb-1" }, log)
-                            )).reverse()
-                        ) : (
-                            React.createElement("p", { className: "text-center text-wood-text/70 italic pt-16" }, "Noch keine Ereignisse. Starte die Simulation, um die Woche voranzutreiben.")
+                React.createElement("div", { className: "space-y-8" },
+                    React.createElement("div", null,
+                        React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "Produktionsübersicht pro Gebäude"),
+                        React.createElement("div", { className: "bg-parchment-light/80 dark:bg-gray-800/30 p-4 rounded-lg border border-wood-light dark:border-gray-600 max-h-[600px] overflow-y-auto space-y-3 shadow-inner" },
+                            economicComponentsBreakdown.length > 0 ? (
+                                economicComponentsBreakdown.map(item => React.createElement(BreakdownItem, { key: item.id, item: item }))
+                            ) : (
+                                React.createElement("p", { className: "text-center text-wood-text/70 dark:text-parchment-bg/60 italic pt-16" }, "Keine produzierenden Gebäude fertiggestellt.")
+                            )
                         )
-                     )
+                    ),
+                     React.createElement("div", null,
+                        React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "📜 Ereignisprotokoll"),
+                        React.createElement("div", { className: "bg-parchment-light/80 dark:bg-gray-800/30 p-4 rounded-lg border border-wood-light dark:border-gray-600 h-[400px] overflow-y-auto space-y-2 shadow-inner" },
+                            simulationLog.length > 0 ? (
+                                simulationLog.slice().reverse().map((log, index) => (
+                                    React.createElement("p", { key: index, className: "text-sm text-wood-text dark:text-parchment-bg/90 border-b border-wood/20 dark:border-parchment-bg/20 pb-1" }, log)
+                                ))
+                            ) : (
+                                React.createElement("p", { className: "text-center text-wood-text/70 dark:text-parchment-bg/60 italic pt-16" }, "Noch keine Ereignisse. Starte die Simulation, um die Woche voranzutreiben.")
+                            )
+                        )
+                    )
                 )
             )
         )
@@ -2533,31 +2707,31 @@ const DefenseTab = ({ stronghold }) => {
 
     return (
         React.createElement("div", null,
-            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark mb-2" }, "🛡️ Verteidigung"),
+            React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🛡️ Verteidigung"),
             React.createElement("p", { className: "mb-6" }, "Analysiere die Verteidigungsstärke deiner Festung und die Wahrscheinlichkeit eines Angriffs. Der Verteidigungsbonus modifiziert die Kampfkraft deiner Garnison."),
             React.createElement("div", { className: "grid md:grid-cols-2 gap-8" },
                 React.createElement("div", null,
-                    React.createElement("div", { className: "bg-red-900/10 p-6 rounded-lg border-2 border-red-800/50 shadow-lg mb-8" },
-                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-red-900" }, "Status & Angriffschance"),
-                        React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
+                    React.createElement("div", { className: "bg-red-900/10 dark:bg-red-900/30 p-6 rounded-lg border-2 border-red-800/50 dark:border-red-500/50 shadow-lg mb-8" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-red-900 dark:text-red-200" }, "Status & Angriffschance"),
+                        React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
                             React.createElement(InfoRow, { label: "Militärischer Wert (MV)", value: `${militaryValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller militärischen Gebäude und Mauern." }),
                             React.createElement(InfoRow, { label: "Formel Wert (IV + EV)", value: `${socialValueForDisplay.toFixed(0)} GP`, tooltip: "Gesamtwert aller industriellen und ökonomischen Gebäude (IV + EV)." }),
-                            React.createElement("hr", { className: "border-red-800/30 my-2" }),
+                            React.createElement("hr", { className: "border-red-800/30 dark:border-red-400/30 my-2" }),
                             React.createElement(InfoRow, { label: "Verteidigungsbonus", value: `${(defenseBonus * 100).toFixed(1)}%`, tooltip: "Stärkt (oder schwächt) deine Garnison basierend auf dem Verhältnis von MV zu (IV+EV)." }),
                             React.createElement(InfoRow, { label: "Angriffschancebonus", value: `${(attackChanceBonus * 100).toFixed(1)}%`, tooltip: "Erhöht die Wahrscheinlichkeit eines Angriffs, wenn der soziale Wert den militärischen übersteigt." }),
-                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-red-800/40 pt-3 mt-3 font-bold text-xl text-red-800" },
+                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-red-800/40 dark:border-red-400/40 pt-3 mt-3 font-bold text-xl text-red-800 dark:text-red-200" },
                                 React.createElement("span", null, "Angriff bei W100 ≤"),
                                 React.createElement("span", null, maxAttackRoll.toFixed(0))
                             )
                         )
                     ),
-                    React.createElement("div", { className: "bg-blue-900/10 p-6 rounded-lg border-2 border-blue-800/50 shadow-lg mb-8" },
-                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900" }, "Kampfstärke"),
-                        React.createElement("div", { className: "space-y-3 bg-black/10 p-4 rounded" },
+                    React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-6 rounded-lg border-2 border-blue-800/50 dark:border-blue-500/50 shadow-lg mb-8" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900 dark:text-blue-200" }, "Kampfstärke"),
+                        React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
                              React.createElement(InfoRow, { label: "Garnisons-CR", value: garrisonCR.toFixed(2), tooltip: "Die effektive Kampfstärke deiner stationierten Truppen, modifiziert durch den Verteidigungsbonus." }),
                              React.createElement(InfoRow, { label: "Angreifer-CR (geschätzt)", value: attackCR.toFixed(2), tooltip: "Die geschätzte Stärke eines potenziellen Angreifers, basierend auf dem Gesamtwert deiner Festung." }),
                              React.createElement("div", { className: "pt-2" },
-                                React.createElement("h4", { className: "font-semibold text-center text-sm text-wood-dark mb-1" }, "Garnisons-Zusammensetzung"),
+                                React.createElement("h4", { className: "font-semibold text-center text-sm text-wood-dark dark:text-gold-light mb-1" }, "Garnisons-Zusammensetzung"),
                                 React.createElement("div", { className: "max-h-24 overflow-y-auto text-xs space-y-1 pr-2" },
                                     staff.length > 0 ? staff.map(s => (
                                         React.createElement("div", { key: s.id, className: "flex justify-between" },
@@ -2571,20 +2745,20 @@ const DefenseTab = ({ stronghold }) => {
                     ),
                     React.createElement("button", { 
                         onClick: simulateNextWeek, 
-                        className: "w-full bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg font-bold py-4 px-6 rounded-lg border-2 border-wood-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark transition-all duration-300 transform hover:-translate-y-0.5 shadow-lg text-xl"
+                        className: "w-full bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg dark:from-gold dark:to-gold-dark dark:text-wood-dark font-bold py-4 px-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark dark:hover:from-gold-light dark:hover:to-gold transition-all duration-300 transform hover:-translate-y-0.5 shadow-lg text-xl"
                     },
                         "Nächste Woche simulieren 🎲"
                     )
                 ),
                 React.createElement("div", null,
-                     React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark mb-4" }, "📜 Ereignisprotokoll"),
-                     React.createElement("div", { className: "bg-parchment-light/80 p-4 rounded-lg border border-wood-light h-[600px] overflow-y-auto space-y-2 shadow-inner" },
+                     React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "📜 Ereignisprotokoll"),
+                     React.createElement("div", { className: "bg-parchment-light/80 dark:bg-gray-800/30 p-4 rounded-lg border border-wood-light dark:border-gray-600 h-[600px] overflow-y-auto space-y-2 shadow-inner" },
                         simulationLog.length > 0 ? (
-                            simulationLog.map((log, index) => (
-                                React.createElement("p", { key: index, className: "text-sm text-wood-text border-b border-wood/20 pb-1" }, log)
-                            )).reverse()
+                            simulationLog.slice().reverse().map((log, index) => (
+                                React.createElement("p", { key: index, className: "text-sm text-wood-text dark:text-parchment-bg/90 border-b border-wood/20 dark:border-parchment-bg/20 pb-1" }, log)
+                            ))
                         ) : (
-                            React.createElement("p", { className: "text-center text-wood-text/70 italic pt-16" }, "Noch keine Ereignisse. Starte die Simulation, um die Woche voranzutreiben.")
+                            React.createElement("p", { className: "text-center text-wood-text/70 dark:text-parchment-bg/60 italic pt-16" }, "Noch keine Ereignisse. Starte die Simulation, um die Woche voranzutreiben.")
                         )
                      )
                 )
@@ -2594,9 +2768,69 @@ const DefenseTab = ({ stronghold }) => {
 };
 
 // --- From App.tsx ---
+const ThemeToggle = ({ theme, setTheme }) => {
+    const themes = [
+        { name: 'light', icon: '☀️' },
+        { name: 'dark', icon: '🌙' },
+        { name: 'system', icon: '🖥️' }
+    ];
+
+    const cycleTheme = () => {
+        const currentIndex = themes.findIndex(t => t.name === theme);
+        const nextIndex = (currentIndex + 1) % themes.length;
+        setTheme(themes[nextIndex].name);
+    };
+
+    const currentTheme = themes.find(t => t.name === theme) || themes[2];
+
+    return (
+        React.createElement("button", {
+            onClick: cycleTheme,
+            className: "absolute top-4 right-4 sm:top-6 sm:right-6 p-2 rounded-full bg-parchment/80 dark:bg-gray-700/80 text-2xl border-2 border-wood dark:border-gold-dark hover:scale-110 transition-transform z-10",
+            title: `Switch to ${themes[(themes.findIndex(t => t.name === theme) + 1) % themes.length].name} mode`
+        },
+            currentTheme.icon
+        )
+    );
+};
+
 const App = () => {
   const [activeTab, setActiveTab] = useState('site');
   const stronghold = useStronghold();
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system');
+
+  const handleSetTheme = (newTheme) => {
+      const root = window.document.documentElement;
+      localStorage.setItem('theme', newTheme);
+      setTheme(newTheme);
+
+      if (newTheme === 'system') {
+          const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (systemPrefersDark) {
+              root.classList.add('dark');
+          } else {
+              root.classList.remove('dark');
+          }
+      } else if (newTheme === 'dark') {
+          root.classList.add('dark');
+      } else {
+          root.classList.remove('dark');
+      }
+  };
+
+  useEffect(() => {
+    handleSetTheme(theme); // Apply theme on initial load
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+        if (localStorage.getItem('theme') === 'system') {
+            handleSetTheme('system');
+        }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []); // Empty dependency array ensures this runs only once on mount
+
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -2625,21 +2859,22 @@ const App = () => {
 
   return (
     React.createElement("div", { className: "min-h-screen p-2 md:p-4 lg:p-6" },
-      React.createElement("div", { className: "container mx-auto max-w-7xl p-2 sm:p-5 bg-parchment-bg/90 border-8 border-wood rounded-2xl shadow-2xl shadow-wood-dark/30" },
+      React.createElement("div", { className: "relative container mx-auto max-w-7xl p-2 sm:p-5 bg-parchment-bg/90 dark:bg-gray-800/95 border-8 border-wood dark:border-wood-dark rounded-2xl shadow-2xl shadow-wood-dark/30 dark:shadow-black/50" },
+        React.createElement(ThemeToggle, { theme: theme, setTheme: handleSetTheme }),
         React.createElement(Header, null),
-        React.createElement("div", { className: "text-center font-semibold text-wood-dark bg-gold/50 py-2 -mt-4 mb-4 border-b-2 border-t-2 border-wood/20" },
+        React.createElement("div", { className: "text-center font-semibold text-wood-dark dark:text-gold-light bg-gold/50 dark:bg-gray-700/50 py-2 -mt-4 mb-4 border-b-2 border-t-2 border-wood/20 dark:border-wood-dark/50" },
           stronghold.activeSaveName ? (
             React.createElement(React.Fragment, null,
               "Aktives Bollwerk: ", React.createElement("span", { className: "font-medieval text-xl" }, stronghold.activeSaveName)
             )
           ) : (
             React.createElement(React.Fragment, null,
-              "Aktives Bollwerk: ", React.createElement("span", { className: "font-medieval text-xl italic text-wood-text/80" }, "Neues, ungespeichertes Bollwerk")
+              "Aktives Bollwerk: ", React.createElement("span", { className: "font-medieval text-xl italic text-wood-text/80 dark:text-parchment-bg/70" }, "Neues, ungespeichertes Bollwerk")
             )
           )
         ),
         React.createElement(Tabs, { activeTab: activeTab, setActiveTab: setActiveTab }),
-        React.createElement("main", { className: "bg-parchment-bg/95 border-x-3 border-b-3 border-wood rounded-b-lg p-4 sm:p-8 min-h-[500px] overflow-hidden" },
+        React.createElement("main", { className: "bg-parchment-bg/95 dark:bg-gray-900/50 border-x-3 border-b-3 border-wood dark:border-wood-dark rounded-b-lg p-4 sm:p-8 min-h-[500px] overflow-hidden" },
           React.createElement("div", { key: activeTab, className: "tab-content-animation" },
             renderTabContent()
           )
