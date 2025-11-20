@@ -716,13 +716,29 @@ const useStronghold = () => {
 
   const removeStaff = useCallback((id) => {
     setState(prevState => {
-      const staffToRemove = prevState.staff.find(s => s.id === id);
-      if (!staffToRemove) return prevState;
+      const staffIndex = prevState.staff.findIndex(s => s.id === id);
+      if (staffIndex === -1) return prevState;
+      
+      const staffToRemove = prevState.staff[staffIndex];
       let updatedComponents = prevState.components;
-      if (staffToRemove.assignedJobId) {
-          updatedComponents = prevState.components.map(c => ({ ...c, jobSlots: c.jobSlots.map(j => j.id === staffToRemove.assignedJobId ? { ...j, filledBy: null } : j) }));
+      let updatedStaff = [...prevState.staff];
+
+      if (staffToRemove.quantity > 1) {
+          // Reduce quantity
+          updatedStaff[staffIndex] = {
+              ...staffToRemove,
+              quantity: staffToRemove.quantity - 1,
+              totalCost: staffToRemove.totalCost - staffToRemove.costPerUnit
+          };
+          return { ...prevState, staff: updatedStaff };
+      } else {
+          // Quantity is 1, remove completely
+          if (staffToRemove.assignedJobId) {
+              updatedComponents = prevState.components.map(c => ({ ...c, jobSlots: c.jobSlots.map(j => j.id === staffToRemove.assignedJobId ? { ...j, filledBy: null } : j) }));
+          }
+          updatedStaff = prevState.staff.filter(s => s.id !== id);
+          return { ...prevState, staff: updatedStaff, components: updatedComponents };
       }
-      return { ...prevState, staff: prevState.staff.filter(s => s.id !== id), components: updatedComponents };
     });
   }, []);
 
@@ -2286,6 +2302,7 @@ const StaffTab = ({ stronghold }) => {
                         availableStaff.length > 0 ? availableStaff.map(s => {
                             const isSkilled = s.hirelingKey === 'skilled';
                             const isMount = !!s.isMount;
+                            const crLabel = s.cr > 0 ? ` (CR ${s.cr})` : '';
                             return (
                                 React.createElement("div", { key: s.id, 
                                      draggable: isSkilled, 
@@ -2298,7 +2315,7 @@ const StaffTab = ({ stronghold }) => {
                                     React.createElement("div", null,
                                         React.createElement("div", { className: "font-bold flex items-center" }, 
                                             isMount && React.createElement("span", { className: "mr-2 text-xl" }, "🐎"),
-                                            `${s.customRole || s.hirelingType} (x${s.quantity})`
+                                            `${s.customRole || s.hirelingType}${crLabel} (x${s.quantity})`
                                         ),
                                         React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, 
                                             s.isVolunteer ? 'Volunteer' : `${s.totalCost.toFixed(2)} gp/week`
@@ -2320,6 +2337,7 @@ const StaffTab = ({ stronghold }) => {
                     React.createElement("div", { className: "bg-wood/5 dark:bg-gray-800/20 p-4 rounded-lg min-h-[300px] border border-wood-light/50 dark:border-gray-600 space-y-2" },
                         openPositions.length > 0 ? openPositions.map(job => {
                             const assignedStaff = job.filledBy ? staff.find(s => s.id === job.filledBy) : null;
+                            const assignedCrLabel = (assignedStaff && assignedStaff.cr > 0) ? ` (CR ${assignedStaff.cr})` : '';
                             return (
                                 React.createElement("div", { key: job.id, onDrop: (e) => handleDropOnJob(e, job), onDragOver: allowDrop,
                                      className: `p-3 rounded border ${assignedStaff ? 'bg-green-200/80 dark:bg-green-900/50 border-green-700 dark:border-green-600' : 'bg-parchment/60 dark:bg-gray-700/30 border-gray-400 border-dashed hover:bg-parchment dark:hover:bg-gray-600/50'}`},
@@ -2330,7 +2348,7 @@ const StaffTab = ({ stronghold }) => {
                                              className: "p-2 mt-1 bg-white dark:bg-gray-800 rounded shadow-inner cursor-grab"},
                                             React.createElement("div", { className: "flex justify-between items-center" },
                                                 React.createElement("div", null,
-                                                    React.createElement("div", { className: "font-bold" }, assignedStaff.customRole || assignedStaff.hirelingType),
+                                                    React.createElement("div", { className: "font-bold" }, `${assignedStaff.customRole || assignedStaff.hirelingType}${assignedCrLabel}`),
                                                     React.createElement("div", { className: "text-xs text-wood-text/80 dark:text-parchment-bg/70" }, assignedStaff.isVolunteer ? 'Volunteer' : `${assignedStaff.totalCost.toFixed(2)} gp/week`)
                                                 ),
                                                 React.createElement(DismissButton, { staffId: assignedStaff.id })
