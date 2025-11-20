@@ -1161,6 +1161,7 @@ const useStronghold = () => {
         // CHANGED: Base Food Capacity set to 5 to represent rations and foraging, allowing initial hiring.
         const capacity = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 5, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
         const demand = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 0, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
+        const rigidDemand = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 0, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
 
         // Separate Stall Space Logic
         let builtStallCapacity = 0;
@@ -1210,20 +1211,31 @@ const useStronghold = () => {
         state.staff.forEach(s => {
             if (s.isMount) {
                 demand.stallSpace += (s.mountSize || 1) * s.quantity;
+                rigidDemand.stallSpace += (s.mountSize || 1) * s.quantity;
             } else if (!s.isVolunteer) {
                 // Paid staff have specific demands
                 totalPaidStaffCount += s.quantity;
-                if (s.hirelingKey === 'unskilled') { demand.servantQuarterSpace += s.quantity; } 
-                else if (s.hirelingKey === 'skilled') { demand.bedroomSpace += s.quantity; } 
-                else if (s.cr <= 0.5) { demand.barracksSpace += s.quantity; } 
-                else if (s.cr <= 2) { demand.bedroomSpace += s.quantity; } 
-                else if (s.cr >= 3) { demand.suiteSpace += s.quantity; }
                 
-                if (s.hirelingKey !== 'unskilled' && s.hirelingKey !== 'skilled') { demand.armorySpace += s.quantity; }
+                if (s.hirelingKey === 'unskilled') { demand.servantQuarterSpace += s.quantity; rigidDemand.servantQuarterSpace += s.quantity; } 
+                else if (s.hirelingKey === 'skilled') { demand.bedroomSpace += s.quantity; rigidDemand.bedroomSpace += s.quantity; } 
+                else if (s.cr <= 0.5) { demand.barracksSpace += s.quantity; rigidDemand.barracksSpace += s.quantity; } 
+                else if (s.cr <= 2) { demand.bedroomSpace += s.quantity; rigidDemand.bedroomSpace += s.quantity; } 
+                else if (s.cr >= 3) { demand.suiteSpace += s.quantity; rigidDemand.suiteSpace += s.quantity; }
+                
+                if (s.hirelingKey !== 'unskilled' && s.hirelingKey !== 'skilled') { 
+                    demand.armorySpace += s.quantity; 
+                    rigidDemand.armorySpace += s.quantity;
+                }
                 
                 demand.food += s.quantity;
+                rigidDemand.food += s.quantity;
+                
                 demand.diningHallSeat += s.quantity;
-                demand.bath += Math.ceil(s.quantity / 10); // Bath calculation is rough, accumulating floats would be better but this is ok for simple sim
+                rigidDemand.diningHallSeat += s.quantity;
+                
+                const bathDemand = Math.ceil(s.quantity / 10);
+                demand.bath += bathDemand; 
+                rigidDemand.bath += bathDemand;
             } else {
                 // Is Volunteer - count them for later distribution
                 totalVolunteerCount += s.quantity;
@@ -1260,16 +1272,16 @@ const useStronghold = () => {
         }
 
         return {
-            servantQuarterSpace: { capacity: capacity.servantQuarterSpace, demand: demand.servantQuarterSpace }, 
-            barracksSpace: { capacity: capacity.barracksSpace, demand: demand.barracksSpace }, 
-            bedroomSpace: { capacity: capacity.bedroomSpace, demand: demand.bedroomSpace }, 
-            suiteSpace: { capacity: capacity.suiteSpace, demand: demand.suiteSpace }, 
-            food: { capacity: capacity.food, demand: demand.food }, 
-            diningHallSeat: { capacity: capacity.diningHallSeat, demand: demand.diningHallSeat }, 
-            armorySpace: { capacity: capacity.armorySpace, demand: demand.armorySpace }, 
-            bath: { capacity: capacity.bath, demand: demand.bath }, 
-            storage: { capacity: capacity.storage, demand: 0 }, 
-            stallSpace: { capacity: capacity.stallSpace, demand: demand.stallSpace },
+            servantQuarterSpace: { capacity: capacity.servantQuarterSpace, demand: demand.servantQuarterSpace, rigidDemand: rigidDemand.servantQuarterSpace }, 
+            barracksSpace: { capacity: capacity.barracksSpace, demand: demand.barracksSpace, rigidDemand: rigidDemand.barracksSpace }, 
+            bedroomSpace: { capacity: capacity.bedroomSpace, demand: demand.bedroomSpace, rigidDemand: rigidDemand.bedroomSpace }, 
+            suiteSpace: { capacity: capacity.suiteSpace, demand: demand.suiteSpace, rigidDemand: rigidDemand.suiteSpace }, 
+            food: { capacity: capacity.food, demand: demand.food, rigidDemand: rigidDemand.food }, 
+            diningHallSeat: { capacity: capacity.diningHallSeat, demand: demand.diningHallSeat, rigidDemand: rigidDemand.diningHallSeat }, 
+            armorySpace: { capacity: capacity.armorySpace, demand: demand.armorySpace, rigidDemand: rigidDemand.armorySpace }, 
+            bath: { capacity: capacity.bath, demand: demand.bath, rigidDemand: rigidDemand.bath }, 
+            storage: { capacity: capacity.storage, demand: 0, rigidDemand: 0 }, 
+            stallSpace: { capacity: capacity.stallSpace, demand: demand.stallSpace, rigidDemand: rigidDemand.stallSpace },
         };
     }, [state.components, state.staff]);
 
@@ -1995,56 +2007,81 @@ const HirelingForm = ({ stronghold }) => {
         const totalStaffCount = staff.reduce((acc, s) => !s.isMount ? acc + s.quantity : acc, 0);
 
         // Common Requirements for Everyone (Including Volunteers)
+        // Food
         if (resources.food.capacity < resources.food.demand + quantity) {
             messages.push(`Benötigt: ${resources.food.demand + quantity - resources.food.capacity} mehr Nahrung. ${RESOURCE_SUGGESTIONS.food}`);
         }
 
-        // Modified: Dining seats only required if NOT a volunteer
-        if (!isVolunteer) {
-            if (resources.diningHallSeat.capacity < resources.diningHallSeat.demand + quantity) {
-                messages.push(`Benötigt: ${resources.diningHallSeat.demand + quantity - resources.diningHallSeat.capacity} mehr Essensplätze. ${RESOURCE_SUGGESTIONS.diningHallSeat}`);
-            }
-        }
-
-        // For Baths, we just check total capacity vs total headcount roughly
+        // Baths (Rough check)
         const requiredBaths = Math.ceil((totalStaffCount + quantity) / 10);
         if (resources.bath.capacity < requiredBaths) {
             messages.push(`Benötigt: ${requiredBaths - resources.bath.capacity} mehr Bad/Bäder. ${RESOURCE_SUGGESTIONS.bath}`);
         }
 
+        // Calculate Total Housing Stats
+        const housingTypes = ['servantQuarterSpace', 'barracksSpace', 'bedroomSpace', 'suiteSpace'];
+        let totalHousingCapacity = 0;
+        let totalHousingDemand = 0;
+        
+        housingTypes.forEach(type => {
+            totalHousingCapacity += resources[type].capacity || 0;
+            totalHousingDemand += resources[type].demand || 0; // Demand here includes existing volunteers due to waterfall
+        });
+
         if (isVolunteer) {
-            // Volunteer specific check: Do we have ANY total housing space left?
-            const totalHousingCapacity = resources.servantQuarterSpace.capacity + resources.barracksSpace.capacity + resources.bedroomSpace.capacity + resources.suiteSpace.capacity;
-            const totalHousingDemand = resources.servantQuarterSpace.demand + resources.barracksSpace.demand + resources.bedroomSpace.demand + resources.suiteSpace.demand;
-            
+            // Volunteer Logic: Flexible
+            // Check if there is ANY total housing space left
             if (totalHousingCapacity < totalHousingDemand + quantity) {
                  messages.push(`Keine freien Schlafplätze mehr vorhanden (Freiwillige nehmen jeden freien Platz). Benötigt: ${totalHousingDemand + quantity - totalHousingCapacity} weitere Betten.`);
             }
             
             return { isValid: messages.length === 0, messages };
-        }
-        
-        // Standard Checks for Paid Staff
-        if (hirelingKey !== 'unskilled' && hirelingKey !== 'skilled') {
-            if (resources.armorySpace.capacity < resources.armorySpace.demand + quantity) {
-                const needed = resources.armorySpace.demand + quantity - resources.armorySpace.capacity;
-                messages.push(`Benötigt: ${needed} mehr Waffenkammer-Plätze. ${RESOURCE_SUGGESTIONS.armorySpace}`);
+        } else {
+            // Paid Staff Logic: Rigid + Displacement
+            
+            // 1. Dining Seats (Paid only)
+            if (resources.diningHallSeat.capacity < resources.diningHallSeat.demand + quantity) {
+                messages.push(`Benötigt: ${resources.diningHallSeat.demand + quantity - resources.diningHallSeat.capacity} mehr Essensplätze. ${RESOURCE_SUGGESTIONS.diningHallSeat}`);
             }
-        }
-        
-        let accommodationType = null;
-        let accommodationName = '';
-        if (hirelingKey === 'unskilled') { accommodationType = 'servantQuarterSpace'; accommodationName = "Dienerquartier-Plätze"; } 
-        else if (hirelingKey === 'skilled') { accommodationType = 'bedroomSpace'; accommodationName = "Schlafzimmer-Plätze"; } 
-        else if (hirelingInfo.cr <= 0.5) { accommodationType = 'barracksSpace'; accommodationName = "Kasernen-Plätze"; } 
-        else if (hirelingInfo.cr <= 2) { accommodationType = 'bedroomSpace'; accommodationName = "Schlafzimmer-Plätze"; } 
-        else if (hirelingInfo.cr >= 3) { accommodationType = 'suiteSpace'; accommodationName = "Suiten-Plätze"; }
 
-        if (accommodationType) {
-            const resource = resources[accommodationType];
-            if (resource.capacity < resource.demand + quantity) {
-                const needed = resource.demand + quantity - resource.capacity;
-                messages.push(`Benötigt: ${needed} mehr ${accommodationName}. ${RESOURCE_SUGGESTIONS[accommodationType]}`);
+            // 2. Armory (Paid soldiers only)
+            if (hirelingKey !== 'unskilled' && hirelingKey !== 'skilled') {
+                if (resources.armorySpace.capacity < resources.armorySpace.demand + quantity) {
+                    const needed = resources.armorySpace.demand + quantity - resources.armorySpace.capacity;
+                    messages.push(`Benötigt: ${needed} mehr Waffenkammer-Plätze. ${RESOURCE_SUGGESTIONS.armorySpace}`);
+                }
+            }
+
+            // 3. Housing Logic for Paid Staff
+            // We need to check two things:
+            // A) Is there enough specific capacity for paid staff (ignoring current volunteers)?
+            // B) Is there enough total capacity for everyone (paid + volunteers + new guy)?
+            
+            let accommodationType = null;
+            let accommodationName = '';
+            if (hirelingKey === 'unskilled') { accommodationType = 'servantQuarterSpace'; accommodationName = "Dienerquartier-Plätze"; } 
+            else if (hirelingKey === 'skilled') { accommodationType = 'bedroomSpace'; accommodationName = "Schlafzimmer-Plätze"; } 
+            else if (hirelingInfo.cr <= 0.5) { accommodationType = 'barracksSpace'; accommodationName = "Kasernen-Plätze"; } 
+            else if (hirelingInfo.cr <= 2) { accommodationType = 'bedroomSpace'; accommodationName = "Schlafzimmer-Plätze"; } 
+            else if (hirelingInfo.cr >= 3) { accommodationType = 'suiteSpace'; accommodationName = "Suiten-Plätze"; }
+
+            if (accommodationType) {
+                const resource = resources[accommodationType];
+                
+                // Check A: Specific Rigid Capacity
+                // RigidDemand tracks only paid staff. 
+                // If Capacity < RigidDemand + NewQuantity, we physically lack the correct beds for paid staff.
+                if (resource.capacity < resource.rigidDemand + quantity) {
+                     const needed = resource.rigidDemand + quantity - resource.capacity;
+                     messages.push(`Benötigt: ${needed} mehr ${accommodationName} für bezahltes Personal. ${RESOURCE_SUGGESTIONS[accommodationType]}`);
+                } 
+                // Check B: Total Displacement Capacity
+                // If specific beds are fine (Check A passes), we must ensure volunteers have *somewhere* to go.
+                else if (totalHousingCapacity < totalHousingDemand + quantity) {
+                    // totalHousingDemand includes existing volunteers.
+                    const globalMissing = (totalHousingDemand + quantity) - totalHousingCapacity;
+                    messages.push(`Nicht genug Gesamt-Schlafplätze. Zwar ist Platz im ${accommodationName}, aber verdrängte Freiwillige finden kein Bett. Baue ${globalMissing} beliebige Betten.`);
+                }
             }
         }
 
