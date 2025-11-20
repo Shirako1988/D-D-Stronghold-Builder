@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
@@ -44,12 +42,12 @@ const RESOURCE_EXPLANATIONS = {
     barracksSpace: "Regeltechnisch: Stellt Unterkünfte für niederrangiges militärisches Personal (CR 1/2 oder niedriger) bereit. Jeder Soldat dieser Stufe (der kein Freiwilliger ist) benötigt einen Platz.",
     bedroomSpace: "Regeltechnisch: Stellt Unterkünfte für gelernte Arbeitskräfte (Skilled Hirelings) und erfahrenes Personal (CR 1-2) bereit. Jeder Arbeiter dieser Stufe (der kein Freiwilliger ist) benötigt einen Platz.",
     suiteSpace: "Regeltechnisch: Stellt luxuriöse Unterkünfte für hochrangiges Personal oder Anführer (CR 3 oder höher) bereit. Jede Person dieser Stufe (die kein Freiwilliger ist) benötigt einen Platz.",
-    food: "Regeltechnisch: Produziert Nahrung für die Bewohner der Festung. Jedes angestellte Personalmitglied (Hireling), das kein Freiwilliger ist, verbraucht pro Woche eine Einheit Nahrung.",
-    diningHallSeat: "Regeltechnisch: Stellt einen Sitzplatz in einem Speisesaal bereit. Jedes angestellte Personalmitglied (das kein Freiwilliger ist) benötigt einen Sitzplatz, um Mahlzeiten einnehmen zu können.",
+    food: "Regeltechnisch: Produziert Nahrung für die Bewohner der Festung. Jedes angestellte Personalmitglied (Hireling), inklusive Freiwillige, verbraucht pro Woche eine Einheit Nahrung. Die Basis-Nahrung (5) repräsentiert Rationen und Futtersuche.",
+    diningHallSeat: "Regeltechnisch: Stellt einen Sitzplatz in einem Speisesaal bereit. Jedes bezahlte Personalmitglied benötigt einen Sitzplatz. Freiwillige essen im Stehen oder wo Platz ist.",
     armorySpace: "Regeltechnisch: Stellt Platz zur Lagerung von Waffen und Rüstungen bereit. Jedes militärische Personalmitglied (Creature CR, exklusive Freiwillige) benötigt einen Platz in der Waffenkammer.",
     bath: "Regeltechnisch: Stellt sanitäre Einrichtungen bereit. Pro 10 Personalmitglieder (exklusive Freiwillige) wird ein Bad benötigt, um die Hygiene und Moral aufrechtzuerhalten.",
     storage: "Regeltechnisch: Bietet allgemeinen Lagerplatz für Güter, Materialien und Vorräte. Der Wert wird in Pfund (lbs) an Kapazität angegeben.",
-    stallSpace: "Regeltechnisch: Stellt einen Platz für ein Reittier oder ein ähnliches Tier bereit. Die Größe bestimmt, welche Art von Tier untergebracht werden kann."
+    stallSpace: "Regeltechnisch: Stellt einen Platz für ein Reittier bereit. Medium Reittiere (Pferde) brauchen 1 Platz, Large (Greifen) 4 Plätze, Huge (Elefanten) 9 Plätze. Benötigt einen Stallmeister. Ein Stallmeister versorgt bis zu 4 Plätze."
 };
 const JOB_EXPLANATION_GENERIC = "Regeltechnisch: Diese Position muss mit einer geeigneten Fachkraft (Skilled Hireling) besetzt werden, damit das Gebäude seine Ressourcen und Fähigkeiten vollumfänglich bereitstellen kann.";
 const ALL_PERKS = Object.values(PERK_LIST);
@@ -117,9 +115,9 @@ const COMPONENTS = {
         "Chapel, luxury": { cost: 25000, ss: 3, jobs: [{ role: 'Priest', count: 1 }] },
         "Prison cell": { cost: 500, ss: 0.5 },
         "Torture chamber": { cost: 3000, ss: 1, jobs: [{ role: 'Torturer', count: 1 }], perks: [{ ...PERK_LIST.INTIMIDATION, baseBonus: 1 }] },
-        "Stable, basic": { cost: 1000, ss: 1, provides: { stallSpace: 4 } },
-        "Stable, fancy": { cost: 3000, ss: 1, provides: { stallSpace: 4 }, perks: [PERK_LIST.EXOTIC_MOUNTS] },
-        "Stable, luxury": { cost: 9000, ss: 1, provides: { stallSpace: 4 }, perks: [PERK_LIST.FLYING_MOUNTS] },
+        "Stable, basic": { cost: 1000, ss: 1, provides: { stallSpace: 4 }, jobs: [{ role: 'Stablemaster', count: 1 }] },
+        "Stable, fancy": { cost: 3000, ss: 1, provides: { stallSpace: 4 }, jobs: [{ role: 'Stablemaster', count: 1 }], perks: [PERK_LIST.EXOTIC_MOUNTS] },
+        "Stable, luxury": { cost: 9000, ss: 1, provides: { stallSpace: 4 }, jobs: [{ role: 'Stablemaster', count: 1 }], perks: [PERK_LIST.FLYING_MOUNTS] },
         "Trophy hall, basic": { cost: 1000, ss: 1 },
         "Trophy hall, fancy (museum)": { cost: 6000, ss: 1 },
         "Auditorium, fancy": { cost: 2000, ss: 1 },
@@ -212,6 +210,12 @@ const HIRELING_DATA = {
     'cr_19': { name: 'CR 19 Creature', cost: 2280, cr: 19 },
     'cr_20': { name: 'CR 20 Creature', cost: 2400, cr: 20 },
 };
+const MOUNT_DATA = {
+    'mount_medium': { name: 'Mount (Medium)', size: 1, cost: 1.4, type: 'basic' }, // 2sp/day
+    'mount_large': { name: 'Mount (Large)', size: 4, cost: 5.6, type: 'basic' }, // 8sp/day
+    'mount_large_flying': { name: 'Mount (Large, Flying)', size: 4, cost: 5.6, type: 'flying', requiredPerk: 'FLYING_MOUNTS' },
+    'mount_huge': { name: 'Mount (Huge)', size: 9, cost: 12.6, type: 'exotic', requiredPerk: 'EXOTIC_MOUNTS' }, // 18sp/day
+};
 const SITE_MODIFIERS = {
     climate: { cold: 5, temperate: 0, warm: -5, aquatic: 15, desert: 10, forest: 0, hill: -5, marsh: 10, mountains: 0, plains: -5, underground: 10, exotic: 15, mobile: -5 },
     settlement: { smallTown_under1: 0, smallTown_1to16: 2, smallTown_17to48: 4, smallTown_49to112: 7, smallTown_113plus: 10, largeTown_under1: 2, largeTown_1to16: 0, largeTown_17to48: 2, largeTown_49to112: 4, largeTown_113plus: 7, smallCity_under1: 3, smallCity_1to16: 1, smallCity_17to48: -2, smallCity_49to112: 1, smallCity_113plus: 6, largeCity_under1: 6, largeCity_1to16: 3, largeCity_17to48: 1, largeCity_49to112: -1, largeCity_113plus: 5, metropolis_under1: 10, metropolis_1to16: 7, metropolis_17to48: 5, metropolis_49to112: 0, metropolis_113plus: 4 },
@@ -242,6 +246,7 @@ const WALL_DURABILITY = {
     adamantine: { hp: 120, ac: 23, damageThreshold: 30 },
 };
 const ROOM_DESCRIPTIONS = {
+    // ... (same as before)
     "Living Quarters": {
         "Bedrooms, basic": "Zwei einfache, aber funktionale Schlafkammern. Jede enthält ein Bett mit Strohmatratze auf einem niedrigen Holzrahmen, eine Kommode und einen einfachen Spiegel. Raue Bänke und kleine Tische vervollständigen die spärliche Einrichtung.",
         "Bedrooms, fancy": "Zwei geschmackvoll eingerichtete Schlafgemächer mit Holzböden und hochwertigen Möbeln. Jedes Zimmer verfügt über ein bequemes Bett mit Baumwollmatratze, einen fein gearbeiteten Schreibtisch und einen Kleiderschrank.",
@@ -259,7 +264,7 @@ const ROOM_DESCRIPTIONS = {
         "Kitchen, fancy": "Eine gut ausgestattete Küche mit einem eisernen Herd, gusseisernem Kochgeschirr und Fliesenboden. Die Speisekammer ist stets gut gefüllt mit hochwertigen Zutaten für anspruchsvolle Gerichte.",
         "Kitchen, luxury": "Eine hochmoderne Großküche mit mehreren Herden, einem offenen Bratfeuer und Arbeitsflächen aus Marmor. Kupfernes Kochgeschirr glänzt im Licht, bereit, Festmahle für Könige zuzubereiten.",
         "Dining hall, basic": "Eine große Halle, dominiert von langen, groben Holztischen und Bänken. Jagdtrophäen und Waffen schmücken die Wände und verleihen dem Raum eine rustikale, wehrhafte Atmosphäre.",
-        "Dining hall, fancy": "Ein eleganter Speisesaal mit fein gearbeiteten Tischen und Stühlen. Ein zentraler Kamin sorgt für Wärme, während Wandmalereien von lokalen Legenden oder Heldentaten erzählen.",
+        "Dining hall, fancy": "Ein eleganten Speisesaal mit fein gearbeiteten Tischen und Stühlen. Ein zentraler Kamin sorgt für Wärme, während Wandmalereien von lokalen Legenden oder Heldentaten erzählen.",
         "Dining hall, luxury": "Ein prunkvoller Bankettsaal mit einer langen Tafel aus poliertem Mahagoni oder Marmor. Silberbesteck, Kristallgläser und feinstes Porzellan stehen bereit, während ein prächtiger Kronleuchter den Raum in goldenes Licht taucht.",
     },
     "Military": {
@@ -300,14 +305,14 @@ const ROOM_DESCRIPTIONS = {
         "Courtyard, basic": "Ein offener, gekiester oder grasbewachsener Innenhof, der als zentraler Treffpunkt und Arbeitsbereich dient. Einige einfache Bänke bieten eine Rastmöglichkeit.",
         "Courtyard, fancy": "Ein gepflegter Innenhof mit gepflasterten Wegen, schmiedeeisernen Bänken und einem einfachen Brunnen in der Mitte. Büsten und kleine Statuen schmücken die Anlage.",
         "Courtyard, luxury": "Ein atemberaubender Gartenhof mit glatten Steinplatten, einem kunstvollen Springbrunnen als Herzstück und meisterhaften Statuen. Ein gläsernes Dach kann bei Bedarf geschlossen werden.",
-        "Chapel, basic": "Ein schlichter Raum, der der Anbetung gewidmet ist. Ein einfacher Altar, grobe Bänke und ein Symbol der verehrten Gottheit bilden das spirituelle Zentrum der Festung.",
-        "Chapel, fancy": "Eine größere Kapelle mit einem polierten Steinaltar, verzierten Kirchenbänken und Buntglasfenstern, die biblische oder heroische Szenen darstellen.",
-        "Chapel, luxury": "Eine prächtige Kathedrale im Kleinen, mit einem juwelenbesetzten Altar, vergoldeten Bänken und großen, kunstvollen Buntglasfenstern, die den Raum in farbiges Licht tauchen.",
+        "Chapel, basic": "Ein schlichter Raum, der der Anbetung gewidmet ist. Ein einfacher Altar, grobe Bänke und ein Symbol der verehrten Gottheit bilden das spirituelle Zentrum. Ermöglicht Priestern, den sozialen Wert zu steigern (Bonus limitiert durch den Wert der Kapelle).",
+        "Chapel, fancy": "Eine größere Kapelle mit einem polierten Steinaltar, verzierten Kirchenbänken und Buntglasfenstern. Kanalisiert göttliche Macht effizienter und erlaubt einen höheren Bonus durch Priester.",
+        "Chapel, luxury": "Eine prächtige Kathedrale im Kleinen, mit einem juwelenbesetzten Altar und vergoldeten Bänken. Ein Ort großer Macht, der Priestern erlaubt, den sozialen Wert der Festung enorm zu steigern.",
         "Prison cell": "Eine karge Zelle mit Eisenfesseln an den Wänden und Strohmatratzen auf dem Boden. Kann als Gemeinschaftszelle oder in mehrere Einzelzellen unterteilt werden.",
         "Torture chamber": "Ein finsterer Raum, gefüllt mit den schrecklichsten Instrumenten, um Schmerz zuzufügen und Informationen zu erpressen. Der Geruch von Angst und kaltem Eisen erfüllt die Luft.",
-        "Stable, basic": "Ein einfacher Holzstall mit Boxen für bis zu sechs Reittiere. Der Boden ist mit Stroh bedeckt, und der Geruch von Heu und Tieren ist allgegenwärtig.",
-        "Stable, fancy": "Ein sauberer Stall mit Steinboden, frischem Heu in den Boxen und eigenen Wassertrögen. Ein kleiner Kamin sorgt im Winter für Wärme.",
-        "Stable, luxury": "Ein palastartiger Stall mit polierten Böden und kunstvollen Holzarbeiten. Jedes Tier hat eine luxuriöse Box, und die Sättel ruhen auf eigenen Podesten. Der Stall ist makellos sauber.",
+        "Stable, basic": "Ein einfacher Holzstall mit Boxen für bis zu vier Reittiere. Benötigt einen Stallmeister. Ein Stallmeister kann bis zu 4 Stallplätze versorgen.",
+        "Stable, fancy": "Ein sauberer Stall mit Steinboden, frischem Heu in den Boxen für bis zu vier Reittiere. Benötigt einen Stallmeister. Ein Stallmeister kann bis zu 4 Stallplätze versorgen. Ermöglicht exotische Reittiere.",
+        "Stable, luxury": "Ein palastartiger Stall mit polierten Böden für bis zu vier Reittiere. Benötigt einen Stallmeister. Ein Stallmeister kann bis zu 4 Stallplätze versorgen. Ermöglicht fliegende Reittiere.",
         "Trophy hall, basic": "Ein Raum, um Trophäen und Erinnerungsstücke von Abenteuern und Schlachten auszustellen. Die Wände sind mit den Köpfen besiegter Monster und erbeuteten Waffen geschmückt.",
         "Trophy hall, fancy (museum)": "Eher ein Museum als ein Trophäenraum. Wertvolle Stücke werden in Vitrinen ausgestellt, versehen mit Gravuren, die ihre Geschichte erzählen. Eine Wache schützt die Exponate.",
         "Auditorium, fancy": "Ein Raum, der speziell für künstlerische Darbietungen konzipiert wurde. Die Akustik ist hervorragend, und eine Bühne bietet Platz für Musiker, Barden oder Schauspieler.",
@@ -681,13 +686,26 @@ const useStronghold = () => {
   }, []);
 
   const addStaff = useCallback((staffToAdd) => {
-    const hirelingInfo = HIRELING_DATA[staffToAdd.hirelingKey];
-    if (!hirelingInfo) return;
+    let cr = 0;
+    if (staffToAdd.isMount) {
+        // Mounts usually don't add to garrison CR in this simplified model
+        cr = 0;
+    } else {
+        const hirelingInfo = HIRELING_DATA[staffToAdd.hirelingKey];
+        if (!hirelingInfo) return;
+        cr = hirelingInfo.cr;
+    }
 
-    const staffWithId = { ...staffToAdd, id: crypto.randomUUID(), cr: hirelingInfo.cr, assignedJobId: null };
+    const staffWithId = { ...staffToAdd, id: crypto.randomUUID(), cr: cr, assignedJobId: null };
 
     setState(prevState => {
-        const existingStaff = prevState.staff.find(s => s.hirelingKey === staffWithId.hirelingKey && s.customRole === staffWithId.customRole && s.isVolunteer === staffWithId.isVolunteer && s.assignedJobId === null);
+        const existingStaff = prevState.staff.find(s => 
+            s.hirelingKey === staffWithId.hirelingKey && 
+            s.customRole === staffWithId.customRole && 
+            s.isVolunteer === staffWithId.isVolunteer && 
+            s.isMount === staffWithId.isMount &&
+            s.assignedJobId === null
+        );
         if (existingStaff) {
             return { ...prevState, staff: prevState.staff.map(s => s.id === existingStaff.id ? { ...s, quantity: s.quantity + staffWithId.quantity, totalCost: s.totalCost + staffWithId.totalCost } : s) };
         } else {
@@ -710,11 +728,60 @@ const useStronghold = () => {
 
   const assignStaffToJob = useCallback((staffId, jobId) => {
       setState(prevState => {
-          let targetComponentId = null;
-          const updatedComponents = prevState.components.map(c => ({ ...c, jobSlots: c.jobSlots.map(j => { if (j.id === jobId) { targetComponentId = c.id; return { ...j, filledBy: staffId }; } return j; }) }));
-          if (!targetComponentId) return prevState;
-          const updatedStaff = prevState.staff.map(s => s.id === staffId ? { ...s, assignedJobId: jobId } : s);
-          return { ...prevState, components: updatedComponents, staff: updatedStaff };
+          const staffIndex = prevState.staff.findIndex(s => s.id === staffId);
+          if (staffIndex === -1) return prevState;
+
+          const staffMember = prevState.staff[staffIndex];
+
+          // Logic Split: If quantity > 1, we split the stack.
+          if (staffMember.quantity > 1) {
+              // 1. Create a new staff entry for the single assigned person
+              const newAssignedStaffId = crypto.randomUUID();
+              const newAssignedStaff = {
+                  ...staffMember,
+                  id: newAssignedStaffId,
+                  quantity: 1,
+                  totalCost: staffMember.costPerUnit, // Cost for 1 unit
+                  assignedJobId: jobId
+              };
+
+              // 2. Update existing staff entry (reduce quantity)
+              const updatedSourceStaff = {
+                  ...staffMember,
+                  quantity: staffMember.quantity - 1,
+                  totalCost: (staffMember.quantity - 1) * staffMember.costPerUnit
+              };
+
+              // 3. Update components to fill the slot with the NEW ID
+              let targetComponentId = null;
+              const updatedComponents = prevState.components.map(c => ({
+                  ...c,
+                  jobSlots: c.jobSlots.map(j => {
+                      if (j.id === jobId) {
+                          targetComponentId = c.id;
+                          return { ...j, filledBy: newAssignedStaffId };
+                      }
+                      return j;
+                  })
+              }));
+
+              if (!targetComponentId) return prevState;
+
+              // 4. Update staff array: replace source, add new
+              const updatedStaff = [...prevState.staff];
+              updatedStaff[staffIndex] = updatedSourceStaff;
+              updatedStaff.push(newAssignedStaff);
+
+              return { ...prevState, components: updatedComponents, staff: updatedStaff };
+
+          } else {
+              // Standard logic for quantity === 1
+              let targetComponentId = null;
+              const updatedComponents = prevState.components.map(c => ({ ...c, jobSlots: c.jobSlots.map(j => { if (j.id === jobId) { targetComponentId = c.id; return { ...j, filledBy: staffId }; } return j; }) }));
+              if (!targetComponentId) return prevState;
+              const updatedStaff = prevState.staff.map(s => s.id === staffId ? { ...s, assignedJobId: jobId } : s);
+              return { ...prevState, components: updatedComponents, staff: updatedStaff };
+          }
       });
   }, []);
 
@@ -723,8 +790,44 @@ const useStronghold = () => {
           const staffMember = prevState.staff.find(s => s.id === staffId);
           if (!staffMember || !staffMember.assignedJobId) return prevState;
           const jobId = staffMember.assignedJobId;
-          const updatedComponents = prevState.components.map(c => ({ ...c, jobSlots: c.jobSlots.map(j => j.id === jobId ? { ...j, filledBy: null } : j) }));
-          const updatedStaff = prevState.staff.map(s => s.id === staffId ? { ...s, assignedJobId: null } : s);
+
+          // 1. Clear the job slot in the component
+          const updatedComponents = prevState.components.map(c => ({
+              ...c,
+              jobSlots: c.jobSlots.map(j => j.id === jobId ? { ...j, filledBy: null } : j)
+          }));
+
+          // 2. Check if there is an existing stack in "available" (assignedJobId: null) to merge with
+          const mergeTargetIndex = prevState.staff.findIndex(s =>
+              s.id !== staffId &&
+              s.assignedJobId === null &&
+              s.hirelingKey === staffMember.hirelingKey &&
+              s.customRole === staffMember.customRole &&
+              s.isVolunteer === staffMember.isVolunteer &&
+              s.isMount === staffMember.isMount
+          );
+
+          let updatedStaff;
+
+          if (mergeTargetIndex !== -1) {
+              // Merge logic: Update target stack, remove unassigned member
+              const targetId = prevState.staff[mergeTargetIndex].id;
+              
+              updatedStaff = prevState.staff.map(s => {
+                  if (s.id === targetId) {
+                      return {
+                          ...s,
+                          quantity: s.quantity + 1,
+                          totalCost: s.totalCost + staffMember.costPerUnit
+                      };
+                  }
+                  return s;
+              }).filter(s => s.id !== staffId);
+          } else {
+              // No merge target logic: Just unassign
+              updatedStaff = prevState.staff.map(s => s.id === staffId ? { ...s, assignedJobId: null } : s);
+          }
+
           return { ...prevState, components: updatedComponents, staff: updatedStaff };
       });
   }, []);
@@ -766,11 +869,19 @@ const useStronghold = () => {
   const grandTotal = useMemo(() => componentsTotal + wallsTotal, [componentsTotal, wallsTotal]);
   const totalArea = useMemo(() => state.components.reduce((sum, c) => sum + c.area, 0), [state.components]);
   
+  const requiredServants = useMemo(() => Math.ceil(totalArea / 2000), [totalArea]);
+  const currentServants = useMemo(() => state.staff
+      .filter(s => s.hirelingKey === 'unskilled')
+      .reduce((sum, s) => sum + s.quantity, 0), [state.staff]);
+  const missingServants = Math.max(0, requiredServants - currentServants);
+  const maintenancePenaltyMultiplier = 1 + missingServants; // 0 missing = 1, 1 missing = 2, etc.
+
   const maintenanceWeekly = useMemo(() => {
       const completedComponentsTotal = state.components.filter(c => c.constructionStatus === 'completed').reduce((sum, c) => sum + c.totalCost, 0);
       const completedWallsTotal = state.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.totalCost, 0);
-      return (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
-  }, [state.components, state.walls]);
+      const baseMaintenance = (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
+      return baseMaintenance * maintenancePenaltyMultiplier;
+  }, [state.components, state.walls, maintenancePenaltyMultiplier]);
 
     const calculateFullValue = useCallback((classification) => {
         return state.components
@@ -801,11 +912,36 @@ const useStronghold = () => {
     const baseEconomicValue = useMemo(() => calculateFullValue('economic'), [calculateFullValue]);
     const baseSocialValue = useMemo(() => calculateFullValue('social'), [calculateFullValue]);
 
+    // --- PRIEST / CHAPEL LOGIC START ---
+    const totalChapelValue = useMemo(() => 
+        state.components
+            .filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('chapel'))
+            .reduce((sum, c) => sum + c.baseCost, 0),
+        [state.components]
+    );
+
+    const priestCount = useMemo(() => {
+         let count = 0;
+         state.components.forEach(c => {
+             if(c.jobSlots) {
+                 c.jobSlots.forEach(slot => {
+                     if(slot.role === 'Priest' && slot.filledBy) count++;
+                 });
+             }
+         });
+         return count;
+    }, [state.components]);
+
+    const potentialPriestBonus = useMemo(() => baseSocialValue * (priestCount * 0.10), [baseSocialValue, priestCount]);
+    const actualPriestBonus = useMemo(() => Math.min(potentialPriestBonus, totalChapelValue), [potentialPriestBonus, totalChapelValue]);
+    const socialValue = baseSocialValue + actualPriestBonus;
+    // --- PRIEST / CHAPEL LOGIC END ---
+
     const damageShare = state.totalDamage > 0 ? state.totalDamage / 3 : 0;
     const militaryValue = Math.max(0, baseMilitaryValue - damageShare);
     const industrialValue = Math.max(0, baseIndustrialValue - damageShare);
     const economicValue = Math.max(0, baseEconomicValue - damageShare);
-    const socialValue = baseSocialValue;
+    // socialValue is already defined above
     const formulaSV = industrialValue + economicValue;
     const totalValue = militaryValue + industrialValue + economicValue + socialValue;
 
@@ -818,8 +954,8 @@ const useStronghold = () => {
         return Math.max(0, scaledBase - damageShare);
     }, [calculateScaledValue, damageShare]);
 
-    const industrialPotential = useMemo(() => industrialValueForProfit * 0.005, [industrialValueForProfit]);
-    const economicPotential = useMemo(() => economicValueForProfit * 0.025 * (economicValueForProfit > 0 ? Math.min(1, industrialValueForProfit / economicValueForProfit) : 0), [economicValueForProfit, industrialValueForProfit]);
+    const industrialPotential = useMemo(() => industrialValueForProfit * 0.01, [industrialValueForProfit]);
+    const economicPotential = useMemo(() => economicValueForProfit * 0.05 * (economicValueForProfit > 0 ? Math.min(1, industrialValueForProfit / economicValueForProfit) : 0), [economicValueForProfit, industrialValueForProfit]);
     const weeklyProfit = useMemo(() => industrialPotential + economicPotential, [industrialPotential, economicPotential]);
 
     const comparisonValue = useMemo(() => (militaryValue + industrialValue + economicValue) * 2, [militaryValue, industrialValue, economicValue]);
@@ -918,10 +1054,27 @@ const useStronghold = () => {
             const baseEV_sim_full = calculateSimFullValue('economic', newState.components);
             const baseSV_social_sim_full = calculateSimFullValue('social', newState.components);
 
+            // --- SIM PRIEST LOGIC ---
+            const simChapelValue = newState.components
+                 .filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('chapel'))
+                 .reduce((sum, c) => sum + c.baseCost, 0);
+
+            let simPriestCount = 0;
+            newState.components.forEach(c => {
+                 if(c.jobSlots) {
+                     c.jobSlots.forEach(slot => {
+                         if(slot.role === 'Priest' && slot.filledBy) simPriestCount++;
+                     });
+                 }
+            });
+            const simPotentialBonus = baseSV_social_sim_full * (simPriestCount * 0.10);
+            const simActualBonus = Math.min(simPotentialBonus, simChapelValue);
+            // --- END SIM PRIEST LOGIC ---
+
             const currentMV = Math.max(0, baseMV_sim - dmgShare_sim);
             const currentIV_full = Math.max(0, baseIV_sim_full - dmgShare_sim);
             const currentEV_full = Math.max(0, baseEV_sim_full - dmgShare_sim);
-            const currentSV_social = baseSV_social_sim_full;
+            const currentSV_social = baseSV_social_sim_full + simActualBonus;
             const currentFormulaSV = currentIV_full + currentEV_full;
             const currentTV = currentMV + currentIV_full + currentEV_full + currentSV_social;
             const currentDefenseBonus = currentMV === 0 ? (currentFormulaSV > 0 ? -0.9 : 0) : Math.max(-0.9, 2 - (currentFormulaSV / currentMV));
@@ -938,9 +1091,9 @@ const useStronghold = () => {
             const currentIV_scaled = Math.max(0, baseIV_sim_scaled - dmgShare_sim);
             const currentEV_scaled = Math.max(0, baseEV_sim_scaled - dmgShare_sim);
             
-            const industrialPotSim = currentIV_scaled * 0.005;
+            const industrialPotSim = currentIV_scaled * 0.01;
             const efficiency = currentEV_scaled > 0 ? Math.min(1, currentIV_scaled / currentEV_scaled) : 0;
-            const economicPotSim = currentEV_scaled * 0.025 * efficiency;
+            const economicPotSim = currentEV_scaled * 0.05 * efficiency;
             const profit = industrialPotSim + economicPotSim;
             newLog.push(`Woche ${weekNumber} (Wirtschaft): Einnahmen von ${profit.toFixed(2)} GP erzielt.`);
 
@@ -951,12 +1104,28 @@ const useStronghold = () => {
 
             const completedComponentsTotal = newState.components.filter(c => c.constructionStatus === 'completed').reduce((sum, c) => sum + c.totalCost, 0);
             const completedWallsTotal = newState.walls.filter(w => w.constructionStatus === 'completed').reduce((sum, w) => sum + w.totalCost, 0);
-            const maintenanceCost = (completedComponentsTotal + completedWallsTotal) * 0.01 / 52;
+            
+            // Logic for Servant Penalty in Simulation
+            const totalArea_sim = newState.components.reduce((sum, c) => sum + c.area, 0);
+            const requiredServants_sim = Math.ceil(totalArea_sim / 2000);
+            const currentServants_sim = newState.staff
+                  .filter(s => s.hirelingKey === 'unskilled')
+                  .reduce((sum, s) => sum + s.quantity, 0);
+            const missingServants_sim = Math.max(0, requiredServants_sim - currentServants_sim);
+            const maintenancePenaltyMultiplier_sim = 1 + missingServants_sim;
+
+            const maintenanceCost = ((completedComponentsTotal + completedWallsTotal) * 0.01 / 52) * maintenancePenaltyMultiplier_sim;
             const totalUpkeep = staffCost + maintenanceCost;
             const netIncome = profit - totalUpkeep;
             const previousTreasury = newState.strongholdTreasury || 0;
             newState.strongholdTreasury = previousTreasury + netIncome;
             newLog.push(`Woche ${weekNumber} (Wirtschaft): Nettoeinkommen von ${netIncome.toFixed(2)} GP. Neues Vermögen: ${newState.strongholdTreasury.toFixed(2)} GP.`);
+            if (missingServants_sim > 0) {
+                newLog.push(`Woche ${weekNumber} (Wartung): ACHTUNG! Wartungskosten um ${missingServants_sim * 100}% erhöht durch Personalmangel (Fehlende Diener: ${missingServants_sim}).`);
+            }
+            if (simActualBonus < simPotentialBonus) {
+                newLog.push(`Woche ${weekNumber} (Sozial): Priester-Bonus ist am Limit! Baue mehr Kapellen, um ${Math.round(simPotentialBonus - simActualBonus)} GP potenziellen Sozialwert freizuschalten.`);
+            }
             
             const scaledShopValue_sim = newState.components
                 .filter(c => c.constructionStatus === 'completed' && c.name.toLowerCase().includes('shop'))
@@ -989,33 +1158,118 @@ const useStronghold = () => {
     }, []);
 
     const resources = useMemo(() => {
-        const capacity = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 0, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
+        // CHANGED: Base Food Capacity set to 5 to represent rations and foraging, allowing initial hiring.
+        const capacity = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 5, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
         const demand = { servantQuarterSpace: 0, barracksSpace: 0, bedroomSpace: 0, suiteSpace: 0, food: 0, diningHallSeat: 0, armorySpace: 0, bath: 0, storage: 0, stallSpace: 0 };
 
+        // Separate Stall Space Logic
+        let builtStallCapacity = 0;
+        let totalStablemasters = 0;
+
+        // Count Active Stablemasters
+        state.components.forEach(c => {
+             if (c.jobSlots) {
+                 c.jobSlots.forEach(slot => {
+                     if (slot.role === 'Stablemaster' && slot.filledBy !== null) {
+                         totalStablemasters++;
+                     }
+                 });
+             }
+        });
+
         state.components.filter(c => c.constructionStatus === 'completed').forEach(c => {
+            // Standard calculation for non-stallSpace resources based on 'canProvide' (at least one job filled)
             let canProvide = !c.jobSlots.length || c.jobSlots.some(slot => slot.filledBy !== null);
+            
+            // For stallSpace, we calculate built capacity regardless of individual job status first
+            const { resources: scaledResources } = calculateScaledBenefits(c.name, c.category, c.area);
+            
+            if (scaledResources.stallSpace) {
+                 builtStallCapacity += scaledResources.stallSpace;
+            }
+
             if (canProvide) {
-                const { resources: scaledResources } = calculateScaledBenefits(c.name, c.category, c.area);
-                for (const [resource, value] of Object.entries(scaledResources)) { capacity[resource] += value; }
+                for (const [resource, value] of Object.entries(scaledResources)) { 
+                    if (resource !== 'stallSpace') {
+                        capacity[resource] = (capacity[resource] || 0) + value; 
+                    }
+                }
             }
         });
 
-        let totalStaffCount = 0;
-        state.staff.filter(s => !s.isVolunteer).forEach(s => {
-            totalStaffCount += s.quantity;
-            if (s.hirelingKey === 'unskilled') { demand.servantQuarterSpace += s.quantity; } 
-            else if (s.hirelingKey === 'skilled') { demand.bedroomSpace += s.quantity; } 
-            else if (s.cr <= 0.5) { demand.barracksSpace += s.quantity; } 
-            else if (s.cr <= 2) { demand.bedroomSpace += s.quantity; } 
-            else if (s.cr >= 3) { demand.suiteSpace += s.quantity; }
-            if (s.hirelingKey !== 'unskilled' && s.hirelingKey !== 'skilled') { demand.armorySpace += s.quantity; }
+        // Apply Stablemaster Limit to Stall Capacity
+        // 1 Stablemaster can tend to 4 slots.
+        const maxServiceableStalls = totalStablemasters * 4;
+        capacity.stallSpace = Math.min(builtStallCapacity, maxServiceableStalls);
+
+
+        let totalVolunteerCount = 0;
+        let totalPaidStaffCount = 0;
+
+        // Phase 1: Calculate Rigid Demand (Non-Volunteers)
+        state.staff.forEach(s => {
+            if (s.isMount) {
+                demand.stallSpace += (s.mountSize || 1) * s.quantity;
+            } else if (!s.isVolunteer) {
+                // Paid staff have specific demands
+                totalPaidStaffCount += s.quantity;
+                if (s.hirelingKey === 'unskilled') { demand.servantQuarterSpace += s.quantity; } 
+                else if (s.hirelingKey === 'skilled') { demand.bedroomSpace += s.quantity; } 
+                else if (s.cr <= 0.5) { demand.barracksSpace += s.quantity; } 
+                else if (s.cr <= 2) { demand.bedroomSpace += s.quantity; } 
+                else if (s.cr >= 3) { demand.suiteSpace += s.quantity; }
+                
+                if (s.hirelingKey !== 'unskilled' && s.hirelingKey !== 'skilled') { demand.armorySpace += s.quantity; }
+                
+                demand.food += s.quantity;
+                demand.diningHallSeat += s.quantity;
+                demand.bath += Math.ceil(s.quantity / 10); // Bath calculation is rough, accumulating floats would be better but this is ok for simple sim
+            } else {
+                // Is Volunteer - count them for later distribution
+                totalVolunteerCount += s.quantity;
+            }
         });
-        demand.food = totalStaffCount;
-        demand.diningHallSeat = totalStaffCount;
-        demand.bath = Math.ceil(totalStaffCount / 10);
+
+        // Phase 2: Distribute Volunteers (Flexible Demand)
+        // Volunteers consume food just like everyone else
+        demand.food += totalVolunteerCount;
+        // Volunteers eat standing up, so they DO NOT consume diningHallSeat.
+        
+        // Baths for volunteers are usually shared, let's add them to the bath count logic roughly
+        demand.bath = Math.ceil((totalPaidStaffCount + totalVolunteerCount) / 10);
+
+        // Housing Waterfall: Volunteers take whatever is free, starting from bottom up.
+        let remainingVolunteers = totalVolunteerCount;
+        const housingHierarchy = ['servantQuarterSpace', 'barracksSpace', 'bedroomSpace', 'suiteSpace'];
+
+        for (const housingType of housingHierarchy) {
+            if (remainingVolunteers <= 0) break;
+            
+            const currentCapacity = capacity[housingType] || 0;
+            const currentOccupied = demand[housingType] || 0;
+            const freeSpace = Math.max(0, currentCapacity - currentOccupied);
+            
+            const take = Math.min(remainingVolunteers, freeSpace);
+            demand[housingType] += take;
+            remainingVolunteers -= take;
+        }
+
+        // If volunteers still have no place to sleep, add deficit to lowest tier
+        if (remainingVolunteers > 0) {
+            demand.servantQuarterSpace += remainingVolunteers;
+        }
 
         return {
-            servantQuarterSpace: { capacity: capacity.servantQuarterSpace, demand: demand.servantQuarterSpace }, barracksSpace: { capacity: capacity.barracksSpace, demand: demand.barracksSpace }, bedroomSpace: { capacity: capacity.bedroomSpace, demand: demand.bedroomSpace }, suiteSpace: { capacity: capacity.suiteSpace, demand: demand.suiteSpace }, food: { capacity: capacity.food, demand: demand.food }, diningHallSeat: { capacity: capacity.diningHallSeat, demand: demand.diningHallSeat }, armorySpace: { capacity: capacity.armorySpace, demand: demand.armorySpace }, bath: { capacity: capacity.bath, demand: demand.bath }, storage: { capacity: capacity.storage, demand: 0 }, stallSpace: { capacity: capacity.stallSpace, demand: 0 },
+            servantQuarterSpace: { capacity: capacity.servantQuarterSpace, demand: demand.servantQuarterSpace }, 
+            barracksSpace: { capacity: capacity.barracksSpace, demand: demand.barracksSpace }, 
+            bedroomSpace: { capacity: capacity.bedroomSpace, demand: demand.bedroomSpace }, 
+            suiteSpace: { capacity: capacity.suiteSpace, demand: demand.suiteSpace }, 
+            food: { capacity: capacity.food, demand: demand.food }, 
+            diningHallSeat: { capacity: capacity.diningHallSeat, demand: demand.diningHallSeat }, 
+            armorySpace: { capacity: capacity.armorySpace, demand: demand.armorySpace }, 
+            bath: { capacity: capacity.bath, demand: demand.bath }, 
+            storage: { capacity: capacity.storage, demand: 0 }, 
+            stallSpace: { capacity: capacity.stallSpace, demand: demand.stallSpace },
         };
     }, [state.components, state.staff]);
 
@@ -1052,7 +1306,8 @@ const useStronghold = () => {
     totalConstructionDays, militaryValue, industrialValue, economicValue, socialValue, totalValue,
     industrialPotential, economicPotential, weeklyProfit, defenseBonus, attackChanceBonus, maxAttackRoll,
     garrisonCR, attackCR, resources, getAllPerks, totalMerchantGold, comparisonValue, salaryReductionPercentage,
-    economicComponentsBreakdown
+    economicComponentsBreakdown, requiredServants, currentServants, missingServants, maintenancePenaltyMultiplier,
+    priestCount, potentialPriestBonus, actualPriestBonus, totalChapelValue
   };
 };
 
@@ -1601,7 +1856,111 @@ const RESOURCE_SUGGESTIONS = {
     diningHallSeat: "Baue eine 'Dining hall'.",
     armorySpace: "Baue eine 'Armory'.",
     bath: "Baue ein 'Bath'.",
+    stallSpace: "Baue 'Stable' und stelle einen 'Stablemaster' ein.",
 };
+
+const MountPurchaseForm = ({ stronghold }) => {
+    const { addStaff, resources, getAllPerks } = stronghold;
+    const [mountKey, setMountKey] = useState(Object.keys(MOUNT_DATA)[0]);
+    const [quantity, setQuantity] = useState(1);
+    const [customName, setCustomName] = useState('');
+    const { staticPerks } = getAllPerks();
+
+    const selectedMount = MOUNT_DATA[mountKey];
+    const totalCost = selectedMount ? selectedMount.cost * quantity : 0;
+    const totalSlots = selectedMount ? selectedMount.size * quantity : 0;
+
+    const validationResult = useMemo(() => {
+        const messages = [];
+        if (!selectedMount) return { isValid: false, messages: [] };
+
+        // Check perks
+        if (selectedMount.requiredPerk) {
+            const hasPerk = staticPerks.some(p => p.id === selectedMount.requiredPerk);
+            if (!hasPerk) {
+                messages.push(`Benötigt Perk: ${selectedMount.requiredPerk} (Upgrade deine Ställe).`);
+            }
+        }
+
+        // Check space
+        if (resources.stallSpace.capacity < resources.stallSpace.demand + totalSlots) {
+            const missing = (resources.stallSpace.demand + totalSlots) - resources.stallSpace.capacity;
+            messages.push(`Nicht genug Stallplatz. Benötigt: ${missing} weitere Slots. ${RESOURCE_SUGGESTIONS.stallSpace}`);
+        }
+
+        return { isValid: messages.length === 0, messages };
+    }, [selectedMount, quantity, resources, staticPerks, totalSlots]);
+
+    const handleAddMount = () => {
+        if (quantity > 0 && validationResult.isValid && selectedMount) {
+             const newMount = {
+                hirelingType: selectedMount.name,
+                hirelingKey: mountKey,
+                customRole: customName.trim(),
+                quantity,
+                costPerUnit: selectedMount.cost,
+                totalCost,
+                cr: 0, // Mounts usually don't fight in this simple abstract simulation unless logic added
+                isVolunteer: false,
+                isMount: true,
+                mountSize: selectedMount.size
+            };
+            addStaff(newMount);
+            setQuantity(1);
+            setCustomName('');
+        }
+    };
+
+    return (
+         React.createElement("div", { className: "bg-wood/10 dark:bg-gray-700/30 p-6 rounded-lg border-2 border-wood-light dark:border-gray-600 space-y-6 mb-8" },
+            React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light -mb-2" }, "🐎 Purchase Mounts"),
+            React.createElement("div", { className: "grid md:grid-cols-2 gap-6" },
+                React.createElement("div", null,
+                    React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Mount Type"),
+                    React.createElement("select", { value: mountKey, onChange: e => setMountKey(e.target.value), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" },
+                        Object.entries(MOUNT_DATA).map(([key, data]) => (
+                            React.createElement("option", { key: key, value: key }, `${data.name} (${data.size} Slot${data.size > 1 ? 's' : ''}, ${data.cost.toFixed(1)} gp/Woche)`)
+                        ))
+                    )
+                ),
+                 React.createElement("div", null,
+                    React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Quantity"),
+                    React.createElement("input", { type: "number", value: quantity, onChange: e => setQuantity(Math.max(1, parseInt(e.target.value) || 1)), className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" })
+                )
+            ),
+             React.createElement("div", null,
+                React.createElement("label", { className: "block font-semibold mb-2 text-wood dark:text-gold-light text-lg" }, "Custom Name (Optional)"),
+                React.createElement("input", { type: "text", value: customName, onChange: e => setCustomName(e.target.value), placeholder: "e.g., Shadowfax, Betsy", className: "w-full p-3 border-2 border-gold dark:border-gray-500 rounded-md bg-white/80 dark:bg-gray-700 dark:text-parchment-light" })
+            ),
+            React.createElement("div", { className: "bg-parchment-light/50 dark:bg-gray-800/40 p-4 rounded-lg text-lg space-y-1" },
+                React.createElement("div", { className: "flex justify-between" },
+                    React.createElement("span", null, "Total Weekly Maintenance:"),
+                    React.createElement("span", { className: "font-bold" }, `${totalCost.toFixed(2)} gp`)
+                ),
+                React.createElement("div", { className: "flex justify-between text-sm text-wood-text/80 dark:text-parchment-bg/70" },
+                     React.createElement("span", null, "Required Stall Slots:"),
+                     React.createElement("span", null, `${totalSlots}`)
+                )
+            ),
+            !validationResult.isValid && (
+              React.createElement("div", { className: "bg-red-200/50 dark:bg-red-900/40 p-4 rounded-lg border border-red-500 dark:border-red-600 text-red-800 dark:text-red-200 space-y-1" },
+                React.createElement("h4", { className: "font-bold text-lg" }, "Voraussetzungen nicht erfüllt:"),
+                React.createElement("ul", { className: "list-disc list-inside text-sm" },
+                  validationResult.messages.map((msg, i) => React.createElement("li", { key: i }, msg))
+                )
+              )
+            ),
+            React.createElement("button", { 
+                onClick: handleAddMount, 
+                disabled: !validationResult.isValid,
+                className: "w-full sm:w-auto bg-gradient-to-br from-wood-light to-wood-dark text-parchment-bg dark:from-gold dark:to-gold-dark dark:text-wood-dark font-bold py-3 px-6 rounded-lg border-2 border-wood-dark dark:border-gold-dark hover:from-gold-dark hover:to-gold-light hover:text-wood-dark dark:hover:from-gold-light dark:hover:to-gold transition-all duration-300 transform hover:-translate-y-0.5 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+            },
+                "➕ Buy Mount(s)"
+            )
+        )
+    )
+}
+
 const HirelingForm = ({ stronghold }) => {
     const { addStaff, resources, staff } = stronghold;
     
@@ -1629,29 +1988,43 @@ const HirelingForm = ({ stronghold }) => {
     }, [hirelingKey, quantity, isVolunteer]);
     
     const validationResult = useMemo(() => {
-        if (isVolunteer) {
-            return { isValid: true, messages: [] };
-        }
-
         const messages = [];
         const hirelingInfo = HIRELING_DATA[hirelingKey];
         if (!hirelingInfo) return { isValid: false, messages: ["Ungültiger Anstellungstyp ausgewählt."] };
 
-        const totalStaffCount = staff.reduce((acc, s) => acc + s.quantity, 0);
+        const totalStaffCount = staff.reduce((acc, s) => !s.isMount ? acc + s.quantity : acc, 0);
 
+        // Common Requirements for Everyone (Including Volunteers)
         if (resources.food.capacity < resources.food.demand + quantity) {
             messages.push(`Benötigt: ${resources.food.demand + quantity - resources.food.capacity} mehr Nahrung. ${RESOURCE_SUGGESTIONS.food}`);
         }
 
-        if (resources.diningHallSeat.capacity < resources.diningHallSeat.demand + quantity) {
-            messages.push(`Benötigt: ${resources.diningHallSeat.demand + quantity - resources.diningHallSeat.capacity} mehr Essensplätze. ${RESOURCE_SUGGESTIONS.diningHallSeat}`);
+        // Modified: Dining seats only required if NOT a volunteer
+        if (!isVolunteer) {
+            if (resources.diningHallSeat.capacity < resources.diningHallSeat.demand + quantity) {
+                messages.push(`Benötigt: ${resources.diningHallSeat.demand + quantity - resources.diningHallSeat.capacity} mehr Essensplätze. ${RESOURCE_SUGGESTIONS.diningHallSeat}`);
+            }
         }
 
+        // For Baths, we just check total capacity vs total headcount roughly
         const requiredBaths = Math.ceil((totalStaffCount + quantity) / 10);
         if (resources.bath.capacity < requiredBaths) {
             messages.push(`Benötigt: ${requiredBaths - resources.bath.capacity} mehr Bad/Bäder. ${RESOURCE_SUGGESTIONS.bath}`);
         }
+
+        if (isVolunteer) {
+            // Volunteer specific check: Do we have ANY total housing space left?
+            const totalHousingCapacity = resources.servantQuarterSpace.capacity + resources.barracksSpace.capacity + resources.bedroomSpace.capacity + resources.suiteSpace.capacity;
+            const totalHousingDemand = resources.servantQuarterSpace.demand + resources.barracksSpace.demand + resources.bedroomSpace.demand + resources.suiteSpace.demand;
+            
+            if (totalHousingCapacity < totalHousingDemand + quantity) {
+                 messages.push(`Keine freien Schlafplätze mehr vorhanden (Freiwillige nehmen jeden freien Platz). Benötigt: ${totalHousingDemand + quantity - totalHousingCapacity} weitere Betten.`);
+            }
+            
+            return { isValid: messages.length === 0, messages };
+        }
         
+        // Standard Checks for Paid Staff
         if (hirelingKey !== 'unskilled' && hirelingKey !== 'skilled') {
             if (resources.armorySpace.capacity < resources.armorySpace.demand + quantity) {
                 const needed = resources.armorySpace.demand + quantity - resources.armorySpace.capacity;
@@ -1693,6 +2066,7 @@ const HirelingForm = ({ stronghold }) => {
                 totalCost,
                 cr: hirelingData.cr,
                 isVolunteer,
+                isMount: false
             };
             addStaff(newStaff);
             setCustomRole('');
@@ -1730,7 +2104,7 @@ const HirelingForm = ({ stronghold }) => {
                     )
                 ),
                 React.createElement("p", { className: "text-sm text-wood-text/70 dark:text-parchment-bg/60 mt-1 italic pl-8" },
-                    "Freiwillige können auch ohne ausreichend Ressourcen (Betten, Essen etc.) angeheuert werden."
+                    "Freiwillige benötigen Nahrung und irgendeinen Schlafplatz, sind aber flexibel in der Unterbringung."
                 )
             ),
             React.createElement("div", { className: "bg-parchment-light/50 dark:bg-gray-800/40 p-4 rounded-lg text-lg" },
@@ -1758,7 +2132,7 @@ const HirelingForm = ({ stronghold }) => {
     )
 }
 const StaffTab = ({ stronghold }) => {
-    const { staff, components, assignStaffToJob, unassignStaffFromJob, removeStaff, resources } = stronghold;
+    const { staff, components, assignStaffToJob, unassignStaffFromJob, removeStaff, resources, requiredServants, currentServants, missingServants } = stronghold;
     const [pendingDismissal, setPendingDismissal] = useState(null);
 
     useEffect(() => {
@@ -1841,38 +2215,65 @@ const StaffTab = ({ stronghold }) => {
         React.createElement("div", null,
             React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "👥 Staff & Hirelings"),
             React.createElement("p", { className: "mb-6" }, "Hire staff and assign them to jobs within your stronghold. Drag and drop 'Skilled Hirelings' to assign them."),
-            React.createElement(HirelingForm, { stronghold: stronghold }),
             React.createElement("div", { className: "bg-wood/10 dark:bg-gray-700/30 p-6 rounded-lg border-2 border-wood-light dark:border-gray-600 space-y-2 mb-8" },
-                React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-2 text-center" }, "🛏️ Unterkünfte des Personals"),
+                React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-2 text-center" }, "🛏️ Unterkünfte & Versorgung"),
                 React.createElement(ResourceRow, { label: "Dienerquartiere", resourceKey: "servantQuarterSpace" }),
                 React.createElement(ResourceRow, { label: "Kasernen", resourceKey: "barracksSpace" }),
                 React.createElement(ResourceRow, { label: "Schlafzimmer", resourceKey: "bedroomSpace" }),
-                React.createElement(ResourceRow, { label: "Suiten", resourceKey: "suiteSpace" })
+                React.createElement(ResourceRow, { label: "Suiten", resourceKey: "suiteSpace" }),
+                React.createElement(ResourceRow, { label: "Stall Space (für Mounts)", resourceKey: "stallSpace" }),
+                React.createElement(ResourceRow, { label: "Nahrung", resourceKey: "food" }),
+                React.createElement(ResourceRow, { label: "Essensplätze", resourceKey: "diningHallSeat" }),
+                
+                React.createElement("div", { className: "border-t border-wood-light/30 dark:border-gray-500/30 my-2" }),
+                
+                // Wartungspersonal (Diener) Anzeige
+                React.createElement("div", { className: `flex flex-col p-1 rounded ${missingServants > 0 ? 'bg-red-300/50 dark:bg-red-900/40' : ''}` },
+                    React.createElement("div", { className: "flex justify-between items-baseline" },
+                        React.createElement("span", null, "Allgemeine Wartung (Diener):"),
+                        React.createElement("span", { className: `font-bold text-lg ${missingServants > 0 ? 'text-red-800 dark:text-red-300' : 'text-green-800 dark:text-green-300'}` }, 
+                            `${currentServants} / ${requiredServants}`
+                        )
+                    ),
+                     React.createElement("div", { className: "text-xs text-right italic opacity-80" }, "(1 Diener pro 2000 sq ft benötigt)"),
+                     missingServants > 0 && React.createElement("div", { className: "text-xs text-red-800 dark:text-red-300 font-bold text-right" }, `ACHTUNG: +${missingServants * 100}% Wartungskosten!`)
+                )
+
             ),
+            React.createElement(HirelingForm, { stronghold: stronghold }),
+            React.createElement(MountPurchaseForm, { stronghold: stronghold }),
             React.createElement("div", { className: "grid lg:grid-cols-2 gap-8" },
                 React.createElement("div", { onDrop: handleDropOnAvailable, onDragOver: allowDrop },
-                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "✅ Available Staff"),
+                    React.createElement("h3", { className: "text-2xl font-medieval text-wood-dark dark:text-gold-light mb-4" }, "✅ Available Staff & Mounts"),
                     React.createElement("div", { className: "bg-wood/5 dark:bg-gray-800/20 p-4 rounded-lg min-h-[300px] border-2 border-dashed border-wood-light/50 dark:border-gray-600/50 space-y-2" },
                         availableStaff.length > 0 ? availableStaff.map(s => {
                             const isSkilled = s.hirelingKey === 'skilled';
+                            const isMount = !!s.isMount;
                             return (
                                 React.createElement("div", { key: s.id, 
                                      draggable: isSkilled, 
                                      onDragStart: isSkilled ? (e) => handleDragStart(e, s.id) : undefined,
-                                     title: !isSkilled ? "Nur Fachkräfte (Skilled Hirelings) können zugewiesen werden." : s.customRole || s.hirelingType,
-                                     className: `p-3 bg-parchment-light dark:bg-gray-700 rounded shadow-sm border border-gold-dark dark:border-gray-500 hover:shadow-md transition-all ${isSkilled ? 'cursor-grab' : 'cursor-not-allowed opacity-70'}`},
-                                    React.createElement("div", { className: "flex justify-between items-center" },
-                                        React.createElement("div", null,
-                                            React.createElement("div", { className: "font-bold" }, `${s.customRole || s.hirelingType} (x${s.quantity})`),
-                                            React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, s.isVolunteer ? 'Volunteer' : `${s.totalCost.toFixed(2)} gp/week`)
+                                     title: isMount ? "Tiere arbeiten nicht (meistens)." : (!isSkilled ? "Nur Fachkräfte (Skilled Hirelings) können zugewiesen werden." : s.customRole || s.hirelingType),
+                                     className: `p-3 rounded shadow-sm border transition-all flex justify-between items-center 
+                                        ${isMount ? 'bg-amber-100 dark:bg-amber-900/40 border-amber-500 dark:border-amber-600' : 'bg-parchment-light dark:bg-gray-700 border-gold-dark dark:border-gray-500'}
+                                        ${isSkilled ? 'cursor-grab hover:shadow-md' : 'cursor-not-allowed opacity-80'}
+                                     `},
+                                    React.createElement("div", null,
+                                        React.createElement("div", { className: "font-bold flex items-center" }, 
+                                            isMount && React.createElement("span", { className: "mr-2 text-xl" }, "🐎"),
+                                            `${s.customRole || s.hirelingType} (x${s.quantity})`
                                         ),
-                                        React.createElement(DismissButton, { staffId: s.id })
-                                    )
+                                        React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, 
+                                            s.isVolunteer ? 'Volunteer' : `${s.totalCost.toFixed(2)} gp/week`
+                                        ),
+                                        isMount && React.createElement("div", { className: "text-xs text-wood-text/60 dark:text-parchment-bg/50" }, `Benötigt ${s.mountSize * s.quantity} Stallplatz`)
+                                    ),
+                                    React.createElement(DismissButton, { staffId: s.id })
                                 )
                             )
                         }) : (
                             React.createElement("div", { className: "flex items-center justify-center h-full text-center text-wood-text/70 dark:text-parchment-bg/60 italic p-8" },
-                                "No available staff. Hire new staff or unassign them from a job."
+                                "No available staff or mounts. Hire new staff/buy mounts."
                             )
                         )
                     )
@@ -1887,6 +2288,7 @@ const StaffTab = ({ stronghold }) => {
                                      className: `p-3 rounded border ${assignedStaff ? 'bg-green-200/80 dark:bg-green-900/50 border-green-700 dark:border-green-600' : 'bg-parchment/60 dark:bg-gray-700/30 border-gray-400 border-dashed hover:bg-parchment dark:hover:bg-gray-600/50'}`},
                                     React.createElement("div", { className: "font-semibold text-wood-dark dark:text-gold-light" }, `${job.role} `, React.createElement("span", { className: "text-sm font-normal text-wood-text/80 dark:text-parchment-bg/70" }, `(${job.componentName})`)),
                                     assignedStaff ? (
+                                         // Fix: Cast props to any to avoid TS overload error with 'draggable'
                                          React.createElement("div", { draggable: true, onDragStart: (e) => handleDragStart(e, assignedStaff.id),
                                              className: "p-2 mt-1 bg-white dark:bg-gray-800 rounded shadow-inner cursor-grab"},
                                             React.createElement("div", { className: "flex justify-between items-center" },
@@ -1898,7 +2300,7 @@ const StaffTab = ({ stronghold }) => {
                                             )
                                         )
                                     ) : (
-                                        React.createElement("div", { className: "text-center text-gray-500 dark:text-gray-400 italic text-sm p-2" }, "Drop staff here")
+                                        React.createElement("div", { className: "text-center text-gray-500 dark:text-gray-400 italic text-sm p-2" }, "Drop Skilled Hireling here")
                                     )
                                 )
                             )
@@ -1921,10 +2323,15 @@ const SocialTab = ({ stronghold }) => {
         comparisonValue, 
         salaryReductionPercentage, 
         baseStaffTotalWeekly, 
-        staffTotalWeekly 
+        staffTotalWeekly,
+        priestCount,
+        potentialPriestBonus,
+        actualPriestBonus,
+        totalChapelValue
     } = stronghold;
 
     const savings = baseStaffTotalWeekly - staffTotalWeekly;
+    const isCapped = potentialPriestBonus > totalChapelValue;
 
     const InfoRowSocial = ({ label, value, tooltip, className = '' }) => (
         React.createElement("div", { className: `flex justify-between items-center py-2 border-b border-wood-light/30 dark:border-parchment-bg/20 ${className}`, title: tooltip },
@@ -1938,26 +2345,61 @@ const SocialTab = ({ stronghold }) => {
             React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "🤝 Soziales & Moral"),
             React.createElement("p", { className: "mb-6" }, "Soziale Gebäude verbessern die Lebensqualität und Moral deiner Angestellten. Eine hohe Moral führt zu geringeren Gehaltsforderungen, da die Angestellten zufriedener sind."),
             React.createElement("div", { className: "grid md:grid-cols-1 lg:grid-cols-2 gap-8" },
-                React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-6 rounded-lg border-2 border-blue-800/50 dark:border-blue-500/50 shadow-lg" },
-                    React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900 dark:text-blue-200" }, "Berechnung der Gehaltsreduktion"),
-                    React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
-                        React.createElement(InfoRowSocial, { 
-                            label: "Sozialer Wert (SV)", 
-                            value: `${socialValue.toFixed(0)} GP`, 
-                            tooltip: "Der Gesamtwert aller fertiggestellten sozialen Gebäude." 
-                        }),
-                        React.createElement(InfoRowSocial, { 
-                            label: "Vergleichswert", 
-                            value: `${comparisonValue.toFixed(0)} GP`, 
-                            tooltip: "Die doppelte Summe des militärischen, industriellen und ökonomischen Wertes. Dient als Maßstab für die 'produktive' Größe der Festung." 
-                        }),
-                        React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-blue-800/40 dark:border-blue-400/40 pt-3 mt-3 font-bold text-xl text-blue-800 dark:text-blue-200" },
-                            React.createElement("span", null, "Gehaltsreduktion:"),
-                            React.createElement("span", null, `${salaryReductionPercentage.toFixed(2)}%`)
+                React.createElement("div", { className: "space-y-6" },
+                    // Gehaltsreduktion Box
+                    React.createElement("div", { className: "bg-blue-900/10 dark:bg-blue-900/30 p-6 rounded-lg border-2 border-blue-800/50 dark:border-blue-500/50 shadow-lg" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-blue-900 dark:text-blue-200" }, "Berechnung der Gehaltsreduktion"),
+                        React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
+                            React.createElement(InfoRowSocial, { 
+                                label: "Sozialer Wert (Gesamt)", 
+                                value: `${socialValue.toFixed(0)} GP`, 
+                                tooltip: "Der Gesamtwert aller fertiggestellten sozialen Gebäude plus Boni (z.B. durch Priester)." 
+                            }),
+                            React.createElement(InfoRowSocial, { 
+                                label: "Vergleichswert", 
+                                value: `${comparisonValue.toFixed(0)} GP`, 
+                                tooltip: "Die doppelte Summe des militärischen, industriellen und ökonomischen Wertes. Dient als Maßstab für die 'produktive' Größe der Festung." 
+                            }),
+                            React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-blue-800/40 dark:border-blue-400/40 pt-3 mt-3 font-bold text-xl text-blue-800 dark:text-blue-200" },
+                                React.createElement("span", null, "Gehaltsreduktion:"),
+                                React.createElement("span", null, `${salaryReductionPercentage.toFixed(2)}%`)
+                            )
+                        )
+                    ),
+                    // Neuer Priester Bonus Block
+                    React.createElement("div", { className: "bg-purple-900/10 dark:bg-purple-900/30 p-6 rounded-lg border-2 border-purple-800/50 dark:border-purple-500/50 shadow-lg" },
+                        React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-purple-900 dark:text-purple-200" }, "Göttlicher Beistand"),
+                        React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
+                             React.createElement(InfoRowSocial, { 
+                                label: "Aktive Priester", 
+                                value: `${priestCount}`,
+                                tooltip: "Anzahl der Priester, die in Kapellen arbeiten."
+                            }),
+                            React.createElement(InfoRowSocial, { 
+                                label: "Priester-Bonus", 
+                                value: `+${(priestCount * 10).toFixed(0)}%`,
+                                tooltip: "Jeder Priester erhöht den sozialen Wert um 10%."
+                            }),
+                            React.createElement("div", { className: "flex justify-between items-center py-2 border-b border-wood-light/30 dark:border-parchment-bg/20", title: "Der Bonus ist auf den Gesamtwert aller Kapellen begrenzt." },
+                                React.createElement("span", null, "Aktueller Bonuswert:"),
+                                React.createElement("span", { className: `font-bold text-lg ${isCapped ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}` }, 
+                                    `${actualPriestBonus.toFixed(0)} GP`
+                                )
+                            ),
+                            React.createElement(InfoRowSocial, { 
+                                label: "Kapellen-Limit (Cap)", 
+                                value: `${totalChapelValue.toFixed(0)} GP`,
+                                tooltip: "Der maximale Bonus, den deine Kapellen kanalisieren können."
+                            }),
+                            isCapped && (
+                                React.createElement("div", { className: "mt-2 text-sm text-red-800 dark:text-red-300 font-bold text-center animate-pulse" },
+                                    `Limit erreicht! Baue mehr Kapellen, um ${Math.round(potentialPriestBonus - actualPriestBonus)} GP Bonus freizuschalten.`
+                                )
+                            )
                         )
                     )
                 ),
-                React.createElement("div", { className: "bg-green-900/10 dark:bg-green-900/30 p-6 rounded-lg border-2 border-green-800/50 dark:border-green-500/50 shadow-lg" },
+                React.createElement("div", { className: "bg-green-900/10 dark:bg-green-900/30 p-6 rounded-lg border-2 border-green-800/50 dark:border-green-500/50 shadow-lg h-min" },
                     React.createElement("h3", { className: "text-2xl font-semibold text-center mb-4 text-green-900 dark:text-green-200" }, "Auswirkung auf Gehälter"),
                      React.createElement("div", { className: "space-y-3 bg-black/10 dark:bg-black/20 p-4 rounded" },
                         React.createElement(InfoRowSocial, { 
@@ -1982,9 +2424,38 @@ const SocialTab = ({ stronghold }) => {
 
 
 // --- From components/ConstructionTab.tsx ---
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+    if (!isOpen) return null;
+    return React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" },
+        React.createElement("div", { className: "bg-parchment-bg dark:bg-gray-800 w-full max-w-md p-0 rounded-lg border-4 border-wood dark:border-gold-dark shadow-2xl transform transition-all scale-100 overflow-hidden" },
+            // Header
+            React.createElement("div", { className: "bg-wood dark:bg-gray-900 p-4 border-b-2 border-wood-light dark:border-gray-700" },
+                React.createElement("h3", { className: "text-2xl font-medieval text-parchment-light dark:text-gold-light text-center" }, title)
+            ),
+            // Body
+            React.createElement("div", { className: "p-6 text-center" },
+                React.createElement("div", { className: "text-5xl mb-4" }, "⚠️"),
+                React.createElement("p", { className: "text-lg text-wood-text dark:text-parchment-bg font-cinzel" }, message)
+            ),
+            // Footer
+            React.createElement("div", { className: "flex justify-center space-x-4 p-6 pt-0" },
+                React.createElement("button", { 
+                    onClick: onClose, 
+                    className: "flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded border-2 border-gray-600 shadow-md transition-transform transform hover:scale-105" 
+                }, "Zurück"),
+                React.createElement("button", { 
+                    onClick: onConfirm, 
+                    className: "flex-1 bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded border-2 border-red-900 shadow-md transition-transform transform hover:scale-105" 
+                }, "Bestätigen")
+            )
+        )
+    );
+};
+
 const ConstructionTab = ({ stronghold }) => {
     const { components, walls, startConstruction, completeConstruction, removeComponent, removeWall } = stronghold;
     const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+    const [itemToCancel, setItemToCancel] = useState(null);
 
     const combinedQueue = useMemo(() => {
         const componentItems = components.map(c => ({...c, itemType: 'component'}));
@@ -1995,26 +2466,20 @@ const ConstructionTab = ({ stronghold }) => {
     const pending = combinedQueue.filter(i => i.constructionStatus === 'pending');
     const inProgress = combinedQueue.filter(i => i.constructionStatus === 'in_progress');
 
-    const QueueItemCard = ({ item }) => {
-        const [isPendingCancel, setIsPendingCancel] = useState(false);
-        
-        useEffect(() => {
-            if (isPendingCancel) {
-                const timer = setTimeout(() => setIsPendingCancel(false), 3000); // Revert after 3 seconds
-                return () => clearTimeout(timer);
-            }
-        }, [isPendingCancel]);
+    const handleConfirmCancel = () => {
+        if (itemToCancel) {
+             if (itemToCancel.itemType === 'component') removeComponent(itemToCancel.id);
+            else removeWall(itemToCancel.id);
+            setItemToCancel(null);
+        }
+    };
 
+    const QueueItemCard = ({ item }) => {
         const baseConstructionDays = calculateConstructionTime(item.baseCost);
         const totalDays = Math.ceil(baseConstructionDays * (1 - item.rushPercent / 100));
 
-        const handleCancel = () => {
-            if (isPendingCancel) {
-                if (item.itemType === 'component') removeComponent(item.id);
-                else removeWall(item.id);
-            } else {
-                setIsPendingCancel(true);
-            }
+        const handleCancelClick = () => {
+            setItemToCancel(item);
         };
 
         const handleStart = () => {
@@ -2041,18 +2506,19 @@ const ConstructionTab = ({ stronghold }) => {
         }, [item.startDate, currentDate, totalDays, item.constructionStatus]);
 
         return (
-            React.createElement("div", { className: "bg-parchment-light/50 dark:bg-gray-700/40 p-4 rounded-md border border-gold-dark dark:border-gray-600 space-y-3 shadow-sm" },
+            React.createElement("div", { className: "bg-parchment-light/50 dark:bg-gray-700/40 p-4 rounded-md border border-gold-dark dark:border-gray-600 space-y-3 shadow-sm relative overflow-hidden" },
                 React.createElement("div", { className: "flex justify-between items-start" },
                     React.createElement("div", null,
-                        React.createElement("div", { className: "font-semibold text-wood dark:text-gold-light text-lg" }, `${item.name} ${item.itemType === 'wall' && 'Wall'}`),
-                        React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, `Cost: ${item.totalCost.toFixed(0)} gp | Time: ${totalDays} days`)
+                        React.createElement("div", { className: "font-semibold text-wood dark:text-gold-light text-lg" }, `${item.name} ${item.itemType === 'wall' ? '(Mauer)' : ''}`),
+                        React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, `Kosten: ${item.totalCost.toFixed(0)} gp | Zeit: ${totalDays} Tage`)
                     ),
                     React.createElement("button", { 
-                        onClick: handleCancel, 
-                        title: isPendingCancel ? 'Confirm Cancellation' : "Cancel Construction", 
-                        className: `font-bold text-xl leading-none transition-all duration-200 ${isPendingCancel ? 'text-white bg-red-600 rounded px-2 text-sm' : 'text-red-700 dark:text-red-400 hover:text-red-500'}`
+                        onClick: handleCancelClick, 
+                        title: "Bau abbrechen", 
+                        className: "bg-red-600/90 hover:bg-red-700 text-white font-bold py-1.5 px-3 rounded text-xs flex items-center gap-2 shadow-sm border border-red-800 transition-all hover:shadow-md hover:scale-105 active:scale-95"
                     },
-                        isPendingCancel ? 'Confirm?' : '×'
+                        React.createElement("span", null, "❌"),
+                        React.createElement("span", null, "Abbrechen")
                     )
                 ),
                 item.constructionStatus === 'in_progress' && (
@@ -2106,7 +2572,14 @@ const ConstructionTab = ({ stronghold }) => {
                         inProgress.length > 0 ? inProgress.map(item => React.createElement(QueueItemCard, { key: `${item.itemType}-${item.id}`, item: item })) : React.createElement("p", { className: "text-center text-wood-text/70 dark:text-parchment-bg/60 italic py-8" }, "No projects currently under construction.")
                     )
                 )
-            )
+            ),
+            React.createElement(ConfirmationModal, {
+                isOpen: !!itemToCancel,
+                onClose: () => setItemToCancel(null),
+                onConfirm: handleConfirmCancel,
+                title: "Bauvorhaben abbrechen",
+                message: `Bist du sicher, dass du den Bau von "${itemToCancel?.name}" abbrechen möchtest? Alle investierten Ressourcen und Fortschritte gehen verloren.`
+            })
         )
     );
 };
@@ -2153,21 +2626,37 @@ const AssetSection = ({ title, value, children }) => (
         )
     )
 );
-const AssetItem = ({ item, isPending, onDelete }) => (
-    React.createElement("div", { className: "flex justify-between items-center bg-parchment-light/50 dark:bg-gray-800/50 p-2 rounded-md" },
+const AssetItem = ({ item, isPending, onDelete }) => {
+    let dimensionDisplay = null;
+
+    if (item.length && item.width) {
+        dimensionDisplay = React.createElement("div", { className: "text-xs text-wood-text/60 dark:text-parchment-bg/50 mt-0.5 flex items-center gap-1" },
+            React.createElement("span", null, "📏"),
+            React.createElement("span", null, `${item.length} ft x ${item.width} ft`),
+            React.createElement("span", { className: "opacity-75" }, `(${item.area} sq ft)`)
+        );
+    } else if (item.length && item.height && item.thickness) {
+         dimensionDisplay = React.createElement("div", { className: "text-xs text-wood-text/60 dark:text-parchment-bg/50 mt-0.5 flex items-center gap-1" },
+            React.createElement("span", null, "🧱"),
+            React.createElement("span", null, `L: ${item.length}' | H: ${item.height}' | T: ${item.thickness}'`)
+        );
+    }
+
+    return React.createElement("div", { className: "flex justify-between items-center bg-parchment-light/50 dark:bg-gray-800/50 p-2 rounded-md mb-2 border border-wood-light/20 dark:border-gray-600/30" },
         React.createElement("div", null,
-            React.createElement("div", { className: "font-semibold" }, item.name),
+            React.createElement("div", { className: "font-semibold text-wood-dark dark:text-gold-light" }, item.name),
+            dimensionDisplay,
             React.createElement("div", { className: "text-sm text-wood-text/80 dark:text-parchment-bg/70" }, `${item.totalCost.toFixed(0)} GP`)
         ),
         React.createElement("button", {
             onClick: onDelete,
             title: isPending ? 'Bestätige Abriss' : 'Abriss',
-            className: `font-bold text-xs py-1 px-2 rounded transition-all duration-200 ${isPending ? 'bg-yellow-500 text-black animate-pulse' : 'bg-red-600 text-white hover:bg-red-700'}`
+            className: `font-bold text-xs py-1 px-2 rounded transition-all duration-200 ${isPending ? 'bg-yellow-500 text-black animate-pulse' : 'bg-red-600/80 text-white hover:bg-red-700'}`
         },
             isPending ? 'Bestätigen?' : 'Abriss'
         )
-    )
-);
+    );
+};
 const SaveLoadManager = ({ stronghold }) => {
     const { saveSlots, activeSaveName, saveAsNewSlot, loadSlot, deleteSlot, renameSlot, copySlot, exportSlot } = stronghold;
     const [newSaveName, setNewSaveName] = useState('');
@@ -2291,7 +2780,7 @@ const SummaryTab = ({ stronghold }) => {
         components, walls, totalDamage, militaryValue, industrialValue, economicValue, socialValue,
         totalValue, totalArea, totalConstructionDays, weeklyUpkeep, weeklyProfit, resources, getAllPerks,
         importStronghold, startNewStronghold, removeComponent, removeWall, repairDamage, saveCurrentSlot, activeSaveName,
-        staffTotalWeekly, maintenanceWeekly, industrialPotential, economicPotential
+        staffTotalWeekly, maintenanceWeekly, industrialPotential, economicPotential, missingServants
     } = stronghold;
     
     const [pendingDeletion, setPendingDeletion] = useState(null);
@@ -2392,6 +2881,10 @@ const SummaryTab = ({ stronghold }) => {
         )
     );
 
+    const maintenanceDisplayValue = missingServants > 0 
+        ? `-${maintenanceWeekly.toFixed(2)} gp (inkl. +${missingServants * 100}% Strafe)` 
+        : `-${maintenanceWeekly.toFixed(2)} gp`;
+
     return (
         React.createElement("div", null,
             React.createElement("h2", { className: "text-3xl font-medieval text-wood-dark dark:text-gold-light mb-2" }, "📊 Stronghold Summary"),
@@ -2461,7 +2954,7 @@ const SummaryTab = ({ stronghold }) => {
                         React.createElement("div", { className: "bg-black/10 dark:bg-black/20 p-4 rounded" },
                             React.createElement("h4", { className: "font-bold text-center text-lg text-red-800 dark:text-red-300 mb-2" }, "📉 Expenses"),
                             React.createElement(SummaryRow, { label: "Staff Salaries", value: `-${staffTotalWeekly.toFixed(2)} gp`, isNegative: true }),
-                            React.createElement(SummaryRow, { label: "Maintenance", value: `-${maintenanceWeekly.toFixed(2)} gp`, isNegative: true }),
+                            React.createElement(SummaryRow, { label: "Maintenance", value: maintenanceDisplayValue, isNegative: true }),
                             React.createElement(SummaryTotalRow, { label: "TOTAL UPKEEP", value: `-${weeklyUpkeep.toFixed(2)} gp`, isNegative: true })
                         )
                     ),
@@ -2487,8 +2980,7 @@ const SummaryTab = ({ stronghold }) => {
                     React.createElement("div", { className: "text-center" },
                         React.createElement("button", { onClick: saveCurrentSlot, disabled: !activeSaveName, className: "bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" },
                             "💾 Speichern"
-                        ),
-                        React.createElement("p", { className: "text-xs italic text-wood-text/70 dark:text-parchment-bg/60 mt-1" }, "(Optional, alle Änderungen werden automatisch gespeichert)")
+                        )
                     ),
                      React.createElement("button", { onClick: handleImportClick, className: "bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors" }, "📤 Importieren"),
                     React.createElement("input", { type: "file", ref: fileInputRef, onChange: handleFileChange, accept: ".json", style: { display: 'none' } }),
@@ -2617,8 +3109,8 @@ const EconomyTab = ({ stronghold }) => {
                             React.createElement(InfoRow, { label: "Industrieller Wert (IV)", value: `${industrialValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller industriellen Gebäude, skaliert nach Arbeiterzahl." }),
                             React.createElement(InfoRow, { label: "Ökonomischer Wert (EV)", value: `${economicValue.toFixed(0)} GP`, tooltip: "Gesamtwert aller ökonomischen Gebäude, skaliert nach Arbeiterzahl." }),
                             React.createElement("hr", { className: "border-wood-light/50 dark:border-parchment-bg/30 my-2" }),
-                            React.createElement(InfoRow, { label: "Industrielles Potential", value: `${industrialPotential.toFixed(2)} GP`, tooltip: "Eigenständiger Profit aus industriellen Gebäuden. Berechnet als: Industrieller Wert × 0.5%." }),
-                            React.createElement(InfoRow, { label: "Ökonomisches Potential", value: `${economicPotential.toFixed(2)} GP`, tooltip: "Eigenständiger Profit aus ökonomischen Gebäuden, modifiziert durch industrielle Effizienz. Berechnet als: Ökonomischer Wert × 2.5% × (min(1, Industrieller Wert / Ökonomischer Wert))." }),
+                            React.createElement(InfoRow, { label: "Industrielles Potential", value: `${industrialPotential.toFixed(2)} GP`, tooltip: "Eigenständiger Profit aus industriellen Gebäuden. Berechnet als: Industrieller Wert × 1%." }),
+                            React.createElement(InfoRow, { label: "Ökonomisches Potential", value: `${economicPotential.toFixed(2)} GP`, tooltip: "Eigenständiger Profit aus ökonomischen Gebäuden, modifiziert durch industrielle Effizienz. Berechnet als: Ökonomischer Wert × 5% × (min(1, Industrieller Wert / Ökonomischer Wert))." }),
                             React.createElement("div", { className: "flex justify-between items-baseline border-t-2 border-wood-light/50 dark:border-gold-dark/50 pt-3 mt-3 font-bold text-xl text-green-800 dark:text-green-300", title: "Gesamteinnahmen aus beiden Potentialen (Industrielles Potential + Ökonomisches Potential)" },
                                 React.createElement("span", null, "Wöchentlicher Gewinn:"),
                                 React.createElement("span", null, `${weeklyProfit.toFixed(2)} GP`)

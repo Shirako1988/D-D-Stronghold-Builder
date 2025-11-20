@@ -1,0 +1,1 @@
+// Datei gelöscht. Die Anwendung läuft jetzt über index.js
